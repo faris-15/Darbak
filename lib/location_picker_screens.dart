@@ -3,8 +3,6 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'app_theme.dart'; // تأكد من وجود الثيم الخاص بكم
 import 'app_widgets.dart';
-import 'package:latlong2/latlong2.dart';
-import 'location_picker_screens.dart';
 
 class MapLocationPickerScreen extends StatefulWidget {
   final String title;
@@ -97,12 +95,15 @@ class _MapLocationPickerScreenState extends State<MapLocationPickerScreen> {
               left: 20,
               right: 20,
               child: DarbakPrimaryButton( // استخدم الويدجت الجاهزة لديكم
-                text: 'تأكيد الموقع الحالي',
+                label: 'تأكيد الموقع الحالي',
                 icon: Icons.check_circle_outline,
-                color: widget.themeColor,
                 onPressed: () {
                   // إعادة الإحداثيات الحقيقية للشاشة السابقة
-                  Navigator.pop(context, _selectedLocation);
+                  Navigator.pop(context, {
+                    'lat': _selectedLocation.latitude,
+                    'lng': _selectedLocation.longitude,
+                    'mapsUrl': 'https://www.google.com/maps?q=${_selectedLocation.latitude},${_selectedLocation.longitude}',
+                  });
                 },
               ),
             ),
@@ -126,6 +127,32 @@ class _MapLocationPickerScreenState extends State<MapLocationPickerScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class PickupLocationPickerScreen extends StatelessWidget {
+  const PickupLocationPickerScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MapLocationPickerScreen(
+      title: 'اختيار موقع الاستلام',
+      themeColor: DarbakColors.primaryGreen,
+      initialLocation: const LatLng(24.7136, 46.6753), // Riyadh coordinates
+    );
+  }
+}
+
+class DropoffLocationPickerScreen extends StatelessWidget {
+  const DropoffLocationPickerScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MapLocationPickerScreen(
+      title: 'اختيار موقع التسليم',
+      themeColor: DarbakColors.primaryGreen,
+      initialLocation: const LatLng(24.7136, 46.6753), // Riyadh coordinates
     );
   }
 }
