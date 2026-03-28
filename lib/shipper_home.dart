@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'app_widgets.dart';
 import 'location_picker_screens.dart';
+import 'trip_screens.dart';
 
 
 /// Home للشاحن (الشركة/الجهة المالكة للشحنات)
@@ -559,25 +560,90 @@ class ShipperMessagesScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: Text(
-        'هنا قائمة المحادثات مع السائقين (سيتم تصميمها لاحقاً).',
-        textAlign: TextAlign.center,
-      ),
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        ListTile(
+          leading: const CircleAvatar(child: Icon(Icons.person_rounded)),
+          title: const Text('السائق عبدالله'),
+          subtitle: const Text('حول شحنة الرياض - الدمام'),
+          trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+          onTap: () {
+            Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => const ChatScreen(shipmentId: '0098', otherUser: 'السائق عبدالله'),
+            ));
+          },
+        ),
+      ],
     );
   }
 }
 
-/// شاشة الحساب
+/// شاشة الحساب (الشاحن/الشركة)
 class ShipperProfileScreen extends StatelessWidget {
   const ShipperProfileScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: Text(
-        'هنا بيانات الشركة/الجهة المالكة للشحنات والمستخدمين المخولين.',
-        textAlign: TextAlign.center,
+    return Scaffold(
+      appBar: AppBar(title: const Text('ملف الشركة')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const DarbakSectionTitle(title: 'معلومات الشركة'),
+            const SizedBox(height: 10),
+            _buildInfoCard('اسم الشركة', 'دربك للنقل'),
+            _buildInfoCard('السجل التجاري', '1010265071'),
+            _buildInfoCard('الـ VAT', '300205584400003'),
+            _buildInfoCard('العنوان', 'الرياض، حي السليمانية'),
+            const SizedBox(height: 16),
+            const DarbakSectionTitle(title: 'تفاصيل الاتصال'),
+            const SizedBox(height: 8),
+            _buildInfoCard('البريد الإلكتروني', 'info@darbak.sa'),
+            _buildInfoCard('الهاتف', '+966555000111'),
+            const SizedBox(height: 16),
+            const DarbakSectionTitle(title: 'تقييم الأداء'),
+            const SizedBox(height: 10),
+            Card(
+              elevation: 0,
+              color: DarbakColors.cardBackground,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: const [
+                    Icon(Icons.star, color: DarbakColors.warningYellow),
+                    SizedBox(width: 8),
+                    Text('4.7 / 5.0', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    Spacer(),
+                    Text('851 تقييم', style: TextStyle(color: DarbakColors.textSecondary)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            DarbakOutlinedButton(
+              label: 'تحديث بيانات الشركة',
+              onPressed: () {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('قريباً: واجهة تحديث بيانات الشركة')));
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoCard(String title, String value) {
+    return Card(
+      elevation: 0,
+      color: DarbakColors.cardBackground,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: ListTile(
+        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text(value),
       ),
     );
   }

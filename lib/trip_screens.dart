@@ -619,8 +619,8 @@ class _PenaltyDetailRow extends StatelessWidget {
   }
 }
 
-/// شاشة المحادثة
-class ChatScreen extends StatelessWidget {
+/// شاشة المحادثة (تفاعلية محلية)
+class ChatScreen extends StatefulWidget {
   final String shipmentId;
   final String otherUser;
 
@@ -631,100 +631,99 @@ class ChatScreen extends StatelessWidget {
   });
 
   @override
+  State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _ChatScreenState extends State<ChatScreen> {
+  final List<Map<String, dynamic>> _messages = [
+    {'text': 'مرحبا، كيف أستلم الشحنة؟', 'isMe': false},
+    {'text': 'التوقيت منسق، سأبلغك عند الوصول.', 'isMe': true},
+  ];
+  final TextEditingController _controller = TextEditingController();
+
+  void _sendMessage() {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    setState(() {
+      _messages.add({'text': text, 'isMe': true});
+      _controller.clear();
+      // محاكاة رد عكسي بسيط
+      Future.delayed(const Duration(milliseconds: 350), () {
+        setState(() {
+          _messages.add({'text': 'سأتأكد وأعود لك خلال دقائق.', 'isMe': false});
+        });
+      });
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(otherUser),
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              // لاحقاً: مكالمة صوتية/فيديو
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'call', child: Text('مكالمة صوتية')),
-              PopupMenuItem(value: 'video', child: Text('مكالمة فيديو')),
-            ],
-          ),
-        ],
+        title: Text(widget.otherUser),
       ),
       body: Column(
         children: [
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.all(16),
-              itemCount: 10,
-              itemBuilder: (context, index) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Align(
-                  alignment: index % 2 == 0
-                      ? Alignment.centerRight
-                      : Alignment.centerLeft,
-                  child: Container(
-                    constraints: BoxConstraints(
-                      maxWidth: MediaQuery.of(context).size.width * 0.7,
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: index % 2 == 0
-                          ? DarbakColors.primaryGreen
-                          : DarbakColors.cardBackground,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      index % 2 == 0
-                          ? 'مرحبا، الشحنة جاهزة للتحميل الآن.'
-                          : 'تمام، سأتوجه للموقع فوراً.',
-                      style: TextStyle(
-                        color:
-                            index % 2 == 0 ? Colors.white : DarbakColors.dark,
+              itemCount: _messages.length,
+              itemBuilder: (context, index) {
+                final msg = _messages[index];
+                final isMe = msg['isMe'] as bool;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Align(
+                    alignment:
+                        isMe ? Alignment.centerRight : Alignment.centerLeft,
+                    child: Container(
+                      constraints: BoxConstraints(
+                        maxWidth: MediaQuery.of(context).size.width * 0.75,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isMe
+                            ? DarbakColors.primaryGreen
+                            : DarbakColors.cardBackground,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                      child: Text(
+                        msg['text'],
+                        style: TextStyle(
+                          color: isMe ? Colors.white : DarbakColors.dark,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ),
           Container(
-            padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
               color: Colors.grey[100],
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(24)),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
             ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             child: SafeArea(
               child: Row(
                 children: [
                   Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(24),
+                    child: TextField(
+                      controller: _controller,
+                      decoration: const InputDecoration(
+                        hintText: 'اكتب رسالتك...',
+                        border: InputBorder.none,
                       ),
-                      child: const TextField(
-                        decoration: InputDecoration(
-                          hintText: 'اكتب رسالتك...',
-                          border: InputBorder.none,
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 12,
-                          ),
-                        ),
-                        textAlign: TextAlign.right,
-                      ),
+                      textAlign: TextAlign.right,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  FloatingActionButton(
-                    mini: true,
-                    onPressed: () {},
-                    backgroundColor: DarbakColors.primaryGreen,
-                    child: const Icon(
-                      Icons.send_rounded,
-                      color: Colors.white,
-                    ),
+                  IconButton(
+                    icon: const Icon(Icons.send_rounded, color: DarbakColors.primaryGreen),
+                    onPressed: _sendMessage,
                   ),
                 ],
               ),
