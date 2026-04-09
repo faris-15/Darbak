@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:file_picker/file_picker.dart';
 import 'app_theme.dart';
 import 'app_widgets.dart';
 import 'driver_home.dart';
 import 'shipper_home.dart';
-
+import 'api_service.dart';
 
 /// شاشة السبلاتش (الشعار)
 class SplashScreen extends StatefulWidget {
@@ -13,21 +16,71 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(seconds: 2), () {
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const ChooseRoleScreen()),
-        );
+    _controller = AnimationController(vsync: this);
+    _controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed) {
+        // Ensure minimum 4 seconds, but since animation completed, navigate
+        Future.delayed(const Duration(milliseconds: 500), () {
+          if (mounted) {
+            _navigateToChooseRole(context);
+          }
+        });
+      }
+    });
+    // Also set a minimum delay of 5 seconds in case animation is short
+    Future.delayed(const Duration(seconds: 5), () {
+      if (mounted && !_controller.isCompleted) {
+        _controller.stop();
+        _navigateToChooseRole(context);
       }
     });
   }
 
   @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _navigateToChooseRole(BuildContext context) async {
+    final prefs = await SharedPreferences.getInstance();
+    final isLoggedIn = prefs.getBool('is_logged_in') ?? false;
+    final savedRole = prefs.getString('user_role');
+
+    Widget target = const ChooseRoleScreen();
+
+    if (isLoggedIn && savedRole != null) {
+      if (savedRole == 'driver') {
+        target = const DriverHomeScreen();
+      } else if (savedRole == 'shipper') {
+        target = const ShipperHomeScreen();
+      } else {
+        target = const ChooseRoleScreen();
+      }
+    }
+
+    Navigator.of(context).pushReplacement(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => target,
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+        transitionDuration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    double screenWidth = MediaQuery.of(context).size.width;
+    double animationSize = screenWidth * 0.6;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -36,19 +89,17 @@ class _SplashScreenState extends State<SplashScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // لاحقًا: استبدلي الأيقونة بصورة اللوقو
-              Container(
-                width: 160,
-                height: 160,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: DarbakColors.lightBackground,
-                ),
-                child: const Icon(
-                  Icons.local_shipping_rounded,
-                  color: DarbakColors.primaryGreen,
-                  size: 80,
-                ),
+              // Lottie animation
+              LottieBuilder.asset(
+                'assets/animations/animation.json',
+                controller: _controller,
+                repeat: false,
+                width: animationSize,
+                height: animationSize,
+                onLoaded: (composition) {
+                  _controller.duration = composition.duration;
+                  _controller.forward();
+                },
               ),
               const SizedBox(height: 24),
               const Text(
@@ -109,7 +160,7 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
               _buildRoleCard(
                 title: 'سائق',
                 description:
-                        'أنت مالك شاحنة أو سائق تبحث عن شحنات تشارك في المناقصات عليها للحصول على أفضل سعر عادل.',
+                    'أنت مالك شاحنة أو سائق تبحث عن شحنات تشارك في المناقصات عليها للحصول على أفضل سعر عادل.',
                 bullets: const [
                   'تصفّح الشحنات المتاحة',
                   'تقديم العروض',
@@ -128,7 +179,7 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
                   'مراجعة العروض',
                   'إدارة العقود والرحلات',
                 ],
-                icon: Icons.domain_rounded,
+                icon: Icons.business_rounded,
                 value: 'shipper',
               ),
               const Spacer(),
@@ -138,14 +189,27 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
                 onPressed: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => LoginScreen(
-                        role: _selectedRole,
-                      ),
+                      builder: (_) => RegistrationScreen(role: _selectedRole),
                     ),
                   );
                 },
               ),
               const SizedBox(height: 16),
+              Center(
+                child: TextButton(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => LoginScreen(role: _selectedRole),
+                      ),
+                    );
+                  },
+                  child: const Text(
+                    'هل لديك حساب بالفعل؟ تسجيل الدخول',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -174,9 +238,7 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
           color: isSelected ? DarbakColors.primaryGreen : Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected
-                ? DarbakColors.primaryGreen
-                : DarbakColors.border,
+            color: isSelected ? DarbakColors.primaryGreen : DarbakColors.border,
           ),
           boxShadow: [
             BoxShadow(
@@ -195,7 +257,9 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
                 children: [
                   Icon(
                     icon,
-                    color: isSelected ? Colors.white : DarbakColors.primaryGreen,
+                    color: isSelected
+                        ? Colors.white
+                        : DarbakColors.primaryGreen,
                   ),
                   const SizedBox(width: 8),
                   Text(
@@ -208,10 +272,7 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
                   ),
                   const Spacer(),
                   if (isSelected)
-                    const Icon(
-                      Icons.check_circle,
-                      color: Colors.white,
-                    ),
+                    const Icon(Icons.check_circle, color: Colors.white),
                 ],
               ),
               const SizedBox(height: 8),
@@ -219,7 +280,9 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
                 description,
                 style: TextStyle(
                   fontSize: 13,
-                  color: isSelected ? Colors.white70 : DarbakColors.textSecondary,
+                  color: isSelected
+                      ? Colors.white70
+                      : DarbakColors.textSecondary,
                 ),
               ),
               const SizedBox(height: 8),
@@ -271,6 +334,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _phoneEmailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _obscure = true;
+  bool _loading = false;
 
   @override
   void dispose() {
@@ -279,15 +343,52 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
+  Future<void> _login() async {
+    setState(() => _loading = true);
+    try {
+      final data = await ApiService.login(
+        _phoneEmailController.text.trim(),
+        _passwordController.text.trim(),
+      );
+      final user = data['user'];
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('is_logged_in', true);
+      await prefs.setInt('user_id', user['id']);
+      await prefs.setString('user_role', user['role']);
+      await prefs.setString('user_email', user['email'] ?? '');
+      await prefs.setString('user_name', user['full_name'] ?? '');
+
+      if (user['role'] == 'driver') {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const DriverHomeScreen()),
+        );
+      } else if (user['role'] == 'shipper') {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const ShipperHomeScreen()),
+        );
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('دور المستخدم غير معروف')));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final String roleLabel =
-        widget.role == 'driver' ? 'سائق' : 'شركة/صاحب شحنة';
+    final String roleLabel = widget.role == 'driver'
+        ? 'سائق'
+        : 'شركة/صاحب شحنة';
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text('تسجيل الدخول - $roleLabel'),
-      ),
+      appBar: AppBar(title: Text('تسجيل الدخول - $roleLabel')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -298,19 +399,7 @@ class _LoginScreenState extends State<LoginScreen> {
               Center(
                 child: Column(
                   children: [
-                    Container(
-                      width: 90,
-                      height: 90,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: DarbakColors.lightBackground,
-                      ),
-                      child: const Icon(
-                        Icons.local_shipping_rounded,
-                        color: DarbakColors.primaryGreen,
-                        size: 48,
-                      ),
-                    ),
+                    Image.asset('lib/assets/assets-logo.jpeg', height: 180),
                     const SizedBox(height: 12),
                     const Text(
                       'تسجيل الدخول',
@@ -380,28 +469,14 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              DarbakPrimaryButton(
-                label: 'متابعة',
-                icon: Icons.arrow_back_ios_new_rounded,
-
-
-
-               onPressed: () {
-  if (widget.role == 'driver') {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const DriverHomeScreen()),
-    );
-  } else {
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const ShipperHomeScreen()),
-    );
-  }
-},
-
-
-
-
-              ),
+              _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : DarbakPrimaryButton(
+                      label: 'متابعة',
+                      icon: Icons.arrow_back_ios_new_rounded,
+                      onPressed: _login,
+                    ),
+              const SizedBox(height: 16),
               const SizedBox(height: 16),
               Center(
                 child: Wrap(
@@ -416,7 +491,12 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     TextButton(
                       onPressed: () {
-                        // لاحقًا: شاشة إنشاء حساب
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                RegistrationScreen(role: widget.role),
+                          ),
+                        );
                       },
                       child: const Text(
                         'سجل الآن',
@@ -429,6 +509,209 @@ class _LoginScreenState extends State<LoginScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// شاشة التسجيل متعددة الخطوات
+class RegistrationScreen extends StatefulWidget {
+  final String role;
+
+  const RegistrationScreen({super.key, required this.role});
+
+  @override
+  State<RegistrationScreen> createState() => _RegistrationScreenState();
+}
+
+class _RegistrationScreenState extends State<RegistrationScreen> {
+  int _currentStep = 0;
+  final _formKey = GlobalKey<FormState>();
+
+  // Controllers
+  final _fullNameController = TextEditingController();
+  final _phoneController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _licenseNoController = TextEditingController();
+  final _commercialNoController = TextEditingController();
+
+  String? _documentPath;
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _fullNameController.dispose();
+    _phoneController.dispose();
+    _passwordController.dispose();
+    _licenseNoController.dispose();
+    _commercialNoController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDocument() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+        allowMultiple: false,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        setState(() {
+          _documentPath = result.files.first.path;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('تم اختيار الملف بنجاح')));
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('لم يتم اختيار أي ملف')));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('خطأ في اختيار الملف: $e')));
+    }
+  }
+
+  Future<void> _register() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _loading = true);
+    try {
+      final data = {
+        'fullName': _fullNameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'phone': _phoneController.text.trim(),
+        'password': _passwordController.text.trim(),
+        'role': widget.role,
+        'licenseNo': widget.role == 'driver'
+            ? _licenseNoController.text.trim()
+            : null,
+        'commercialNo': widget.role == 'shipper'
+            ? _commercialNoController.text.trim()
+            : null,
+        'documentPath': _documentPath,
+      };
+
+      await ApiService.register(data);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تم التسجيل بنجاح! انتظر التحقق من الأدمن'),
+        ),
+      );
+      Navigator.of(context).pop();
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('إنشاء حساب جديد')),
+      body: Stepper(
+        currentStep: _currentStep,
+        onStepContinue: () {
+          if (_currentStep < 2) {
+            setState(() => _currentStep++);
+          } else {
+            _register();
+          }
+        },
+        onStepCancel: () {
+          if (_currentStep > 0) {
+            setState(() => _currentStep--);
+          }
+        },
+        steps: [
+          Step(
+            title: const Text('البيانات الأساسية'),
+            content: Form(
+              key: _formKey,
+              child: Column(
+                children: [
+                  TextFormField(
+                    controller: _fullNameController,
+                    decoration: const InputDecoration(
+                      labelText: 'الاسم الكامل',
+                    ),
+                    validator: (v) => v!.isEmpty ? 'مطلوب' : null,
+                  ),
+                  TextFormField(
+                    controller: _emailController,
+                    decoration: const InputDecoration(
+                      labelText: 'البريد الإلكتروني',
+                    ),
+                    keyboardType: TextInputType.emailAddress,
+                    validator: (v) => v!.isEmpty ? 'مطلوب' : null,
+                  ),
+                  TextFormField(
+                    controller: _phoneController,
+                    decoration: const InputDecoration(labelText: 'رقم الجوال'),
+                    validator: (v) => v!.isEmpty ? 'مطلوب' : null,
+                  ),
+                  TextFormField(
+                    controller: _passwordController,
+                    decoration: const InputDecoration(labelText: 'كلمة المرور'),
+                    obscureText: true,
+                    validator: (v) =>
+                        v!.length < 6 ? 'يجب أن تكون 6 أحرف على الأقل' : null,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Step(
+            title: const Text('بيانات إضافية'),
+            content: Column(
+              children: [
+                if (widget.role == 'driver')
+                  TextFormField(
+                    controller: _licenseNoController,
+                    decoration: const InputDecoration(
+                      labelText: 'رقم رخصة القيادة',
+                    ),
+                  ),
+                if (widget.role == 'shipper')
+                  TextFormField(
+                    controller: _commercialNoController,
+                    decoration: const InputDecoration(
+                      labelText: 'رقم السجل التجاري',
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Step(
+            title: const Text('رفع الوثائق'),
+            content: Column(
+              children: [
+                const Text('يرجى رفع الوثيقة المطلوبة (PDF)'),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: _pickDocument,
+                  icon: const Icon(Icons.upload_file),
+                  label: const Text('اختر ملف'),
+                ),
+                if (_documentPath != null) Text('تم اختيار: $_documentPath'),
+                const SizedBox(height: 16),
+                _loading
+                    ? const CircularProgressIndicator()
+                    : ElevatedButton(
+                        onPressed: _register,
+                        child: const Text('إنشاء الحساب'),
+                      ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

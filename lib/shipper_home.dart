@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'app_theme.dart';
-import 'app_widgets.dart';
+import 'api_service.dart';
 import 'location_picker_screens.dart';
+import 'shipment_screens.dart';
 import 'trip_screens.dart';
-
 
 /// Home للشاحن (الشركة/الجهة المالكة للشحنات)
 class ShipperHomeScreen extends StatefulWidget {
@@ -19,23 +21,16 @@ class _ShipperHomeScreenState extends State<ShipperHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      const ShipperShipmentsScreen(),      // شحناتي
-      const ShipperNotificationsScreen(),  // التنبيهات
-      const ShipperMessagesScreen(),       // الرسائل
-      const ShipperProfileScreen(),        // الحساب
+      const ShipperShipmentsScreen(), // شحناتي
+      const ShipperNotificationsScreen(), // التنبيهات
+      const ShipperMessagesScreen(), // الرسائل
+      const ShipperProfileScreen(), // الحساب
     ];
 
-    final titles = [
-      'شحناتي',
-      'التنبيهات',
-      'الرسائل',
-      'حسابي',
-    ];
+    final titles = ['شحناتي', 'التنبيهات', 'الرسائل', 'حسابي'];
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(titles[_currentIndex]),
-      ),
+      appBar: AppBar(title: Text(titles[_currentIndex])),
       body: pages[_currentIndex],
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
@@ -74,60 +69,116 @@ class _ShipperHomeScreenState extends State<ShipperHomeScreen> {
   }
 }
 
-/// شاشة شحنات الشاحن (Empty State + زر شحنة جديدة)
-class ShipperShipmentsScreen extends StatelessWidget {
+/// شاشة شحنات الشاحن (مع عرض الشحنات النشطة)
+class ShipperShipmentsScreen extends StatefulWidget {
   const ShipperShipmentsScreen({super.key});
 
   @override
+  State<ShipperShipmentsScreen> createState() => _ShipperShipmentsScreenState();
+}
+
+class _ShipperShipmentsScreenState extends State<ShipperShipmentsScreen> {
+  List<Map<String, dynamic>> _shipments = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadShipments();
+  }
+
+  Future<void> _loadShipments() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final shipperId = prefs.getInt('user_id');
+      if (shipperId == null) {
+        setState(() {
+          _error = 'لم يتم العثور على بيانات المستخدم';
+          _loading = false;
+        });
+        return;
+      }
+
+      final allShipments = await ApiService.getShipments();
+      final myShipments = allShipments.where((s) => s['shipper_id'] == shipperId).toList();
+      setState(() {
+        _shipments = myShipments.map((s) => s as Map<String, dynamic>).toList();
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null) {
+      return Center(child: Text('خطأ: $_error'));
+    }
+
     return SafeArea(
       child: Column(
         children: [
           // شريط أعلى + زر شحنة جديدة
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Row(
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              alignment: WrapAlignment.end,
               children: [
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
-                    ),
-                    decoration: BoxDecoration(
-                      color: DarbakColors.cardBackground,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Directionality(
-                      textDirection: TextDirection.rtl,
-                      child: Row(
-                        children: const [
-                          Icon(
-                            Icons.local_shipping_rounded,
-                            size: 18,
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: DarbakColors.cardBackground,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Directionality(
+                    textDirection: TextDirection.rtl,
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.inventory_2_rounded,
+                          size: 18,
+                          color: DarbakColors.dark,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'الشحنات النشطة: ${_shipments.length}',
+                          style: TextStyle(
+                            fontSize: 13,
                             color: DarbakColors.dark,
                           ),
-                          SizedBox(width: 8),
-                          Text(
-                            'الشحنات النشطة: 0',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: DarbakColors.dark,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
                 ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).push(
+                  onPressed: () async {
+                    await Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => const CreateShipmentScreen(),
                       ),
                     );
+                    // Refresh shipments after creating new one
+                    _loadShipments();
                   },
                   icon: const Icon(Icons.add_rounded),
                   label: const Text(
@@ -139,51 +190,114 @@ class ShipperShipmentsScreen extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                   ),
                 ),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const ShipperBidsListScreen(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.gavel_outlined),
+                  label: const Text(
+                    'عرض العروض',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ),
               ],
             ),
           ),
           Expanded(
-            child: const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.inventory_2_outlined,
-                    size: 64,
-                    color: DarbakColors.textSecondary,
-                  ),
-                  SizedBox(height: 16),
-                  Text(
-                    'لا توجد شحنات حالياً',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: DarbakColors.dark,
+            child: _shipments.isEmpty
+                ? const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.inventory_2_outlined,
+                          size: 64,
+                          color: DarbakColors.textSecondary,
+                        ),
+                        SizedBox(height: 16),
+                        Text(
+                          'لا توجد شحنات حالياً',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: DarbakColors.dark,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 32),
+                          child: Text(
+                            'اضغط على "شحنة جديدة" لبدء إنشاء شحنتك الأولى',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: DarbakColors.textSecondary,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
                     ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _shipments.length,
+                    itemBuilder: (context, index) {
+                      final shipment = _shipments[index];
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'شحنة #${shipment['id']}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: shipment['status'] == 'bidding' ? Colors.green.shade100 : Colors.grey.shade100,
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Text(
+                                      shipment['status'] == 'bidding' ? 'في المزاد' : shipment['status'],
+                                      style: TextStyle(
+                                        color: shipment['status'] == 'bidding' ? Colors.green : Colors.grey,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text('من: ${shipment['pickup_address']}'),
+                              Text('إلى: ${shipment['dropoff_address']}'),
+                              Text('الوزن: ${shipment['weight_kg']} طن'),
+                              Text('السعر الأساسي: ${shipment['base_price']} ريال'),
+                              Text('الموعد النهائي: ${shipment['expected_delivery_date']}'),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
-                  SizedBox(height: 8),
-                  Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 32),
-                    child: Text(
-                      'ستظهر هنا شحناتك عند ربط النظام الخلفي\n(ListView.builder + API)',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: DarbakColors.textSecondary,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ],
-              ),
-            ),
           ),
         ],
       ),
     );
   }
 }
-
-
 
 /// شاشة إنشاء شحنة جديدة (مع تحديد موقع التحميل + التسليم)
 class CreateShipmentScreen extends StatefulWidget {
@@ -200,7 +314,10 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
   final TextEditingController _weightController = TextEditingController();
   final TextEditingController _distanceController = TextEditingController();
   final TextEditingController _cargoTypeController = TextEditingController();
-  final TextEditingController _edtController = TextEditingController();
+  final TextEditingController _basePriceController = TextEditingController();
+
+  DateTime? _selectedDateTime;
+  bool _isSubmitting = false;
 
   // بيانات موقع التحميل
   String? pickupMapsUrl;
@@ -219,16 +336,42 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
     _weightController.dispose();
     _distanceController.dispose();
     _cargoTypeController.dispose();
-    _edtController.dispose();
+    _basePriceController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickDateTime() async {
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now().add(const Duration(days: 1)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+
+    if (pickedDate != null) {
+      final TimeOfDay? pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.now(),
+      );
+
+      if (pickedTime != null) {
+        setState(() {
+          _selectedDateTime = DateTime(
+            pickedDate.year,
+            pickedDate.month,
+            pickedDate.day,
+            pickedTime.hour,
+            pickedTime.minute,
+          );
+        });
+      }
+    }
   }
 
   Future<void> _pickPickupLocation() async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => const PickupLocationPickerScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const PickupLocationPickerScreen()),
     );
 
     if (result != null && mounted) {
@@ -243,9 +386,7 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
   Future<void> _pickDropoffLocation() async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => const DropoffLocationPickerScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const DropoffLocationPickerScreen()),
     );
 
     if (result != null && mounted) {
@@ -260,9 +401,7 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('شحنة جديدة'),
-      ),
+      appBar: AppBar(title: const Text('شحنة جديدة')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
@@ -273,10 +412,15 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const DarbakSectionTitle(
-                    title: 'بيانات الشحنة',
-                  ),
-                  const SizedBox(height: 16),
+                    Text(
+                      'بيانات الشحنة',
+                      style: GoogleFonts.cairo(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: const Color(0xff168A57),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
 
                   // مدينة التحميل
                   _buildTextField(
@@ -307,15 +451,11 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                     const SizedBox(height: 4),
                     Row(
                       children: const [
-                        Icon(Icons.check_circle,
-                            color: Colors.green, size: 18),
+                        Icon(Icons.check_circle, color: Colors.green, size: 18),
                         SizedBox(width: 6),
                         Text(
                           'تم تحديد موقع التحميل',
-                          style: TextStyle(
-                            color: Colors.green,
-                            fontSize: 12,
-                          ),
+                          style: TextStyle(color: Colors.green, fontSize: 12),
                         ),
                       ],
                     ),
@@ -352,15 +492,15 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                     const SizedBox(height: 4),
                     Row(
                       children: const [
-                        Icon(Icons.check_circle,
-                            color: Colors.orange, size: 18),
+                        Icon(
+                          Icons.check_circle,
+                          color: Colors.orange,
+                          size: 18,
+                        ),
                         SizedBox(width: 6),
                         Text(
                           'تم تحديد موقع التسليم',
-                          style: TextStyle(
-                            color: Colors.orange,
-                            fontSize: 12,
-                          ),
+                          style: TextStyle(color: Colors.orange, fontSize: 12),
                         ),
                       ],
                     ),
@@ -377,12 +517,24 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                   ),
                   const SizedBox(height: 12),
 
+                  // السعر الأساسي
+                  _buildTextField(
+                    label: 'السعر الأساسي المقترح (ريال)',
+                    controller: _basePriceController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    validatorMsg: 'الرجاء إدخال السعر الأساسي',
+                  ),
+                  const SizedBox(height: 12),
+
                   // الوزن
                   _buildTextField(
                     label: 'وزن الشحنة (بالطن)',
                     controller: _weightController,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                     validatorMsg: 'الرجاء إدخال الوزن',
                   ),
                   const SizedBox(height: 12),
@@ -396,38 +548,131 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  const DarbakSectionTitle(
-                    title: 'موعد التسليم الأقصى (EDT)',
-                    subtitle:
-                        'يجب تسليم الشحنة قبل أو في هذا الموعد، وبعده يتم احتساب خصم تأخير آلياً.',
+                  Text(
+                    'موعد التسليم الأقصى (EDT)',
+                    style: GoogleFonts.cairo(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: const Color(0xff168A57),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'يجب تسليم الشحنة قبل أو في هذا الموعد، وبعده يتم احتساب خصم تأخير آلياً.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
                   ),
                   const SizedBox(height: 8),
 
-                  _buildTextField(
-                    label: 'مثال: 18 يناير 2025 - 06:00 م',
-                    controller: _edtController,
-                    validatorMsg: 'تحديد EDT إلزامي وفقاً لمتطلبات النظام',
+                  InkWell(
+                    onTap: _pickDateTime,
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.shade300),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.calendar_today, color: Color(0xff168A57)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _selectedDateTime != null
+                                  ? '${_selectedDateTime!.day}/${_selectedDateTime!.month}/${_selectedDateTime!.year} ${_selectedDateTime!.hour}:${_selectedDateTime!.minute.toString().padLeft(2, '0')}'
+                                  : 'اختر التاريخ والوقت',
+                              style: TextStyle(
+                                color: _selectedDateTime != null ? Colors.black : Colors.grey,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
+                  // if (_selectedDateTime == null) ...[
+                  //   Padding(
+                  //     padding: const EdgeInsets.only(top: 4),
+                  //     child: const Text(
+                  //       'تحديد EDT إلزامي وفقاً لمتطلبات النظام',
+                  //       style: TextStyle(color: Colors.red, fontSize: 12),
+                  //     ),
+                  //   ),
+                  // ],
                   const SizedBox(height: 24),
 
-                  DarbakPrimaryButton(
-                    label: 'حفظ ونشر الشحنة في السوق',
-                    icon: Icons.check_circle_outline_rounded,
-                    onPressed: () {
-                      if (_formKey.currentState?.validate() ?? false) {
-                        // هنا لاحقاً نرسل كل شيء للباك إند:
-                        // pickupLat, pickupLng, pickupMapsUrl,
-                        // dropoffLat, dropoffLng, dropoffMapsUrl, ...
+                  ElevatedButton(
+                    onPressed: _isSubmitting ? null : () async {
+                      if (!(_formKey.currentState?.validate() ?? false)) return;
+                      if (_selectedDateTime == null) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text(
-                              'تم إنشاء الشحنة محلياً. لاحقاً سيتم إرسالها للنظام الخلفي.',
-                            ),
+                            content: Text('يرجى تحديد موعد التسليم الأقصى'),
+                          ),
+                        );
+                        return;
+                      }
+
+                      setState(() => _isSubmitting = true);
+
+                      final prefs = await SharedPreferences.getInstance();
+                      final shipperId = prefs.getInt('user_id');
+
+                      if (shipperId == null) {
+                        setState(() => _isSubmitting = false);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('لم يتم العثور على بيانات المستخدم'),
+                          ),
+                        );
+                        return;
+                      }
+
+                      try {
+                        // Format date as YYYY-MM-DD HH:MM:SS
+                        final formattedDate = '${_selectedDateTime!.year.toString().padLeft(4, '0')}-${_selectedDateTime!.month.toString().padLeft(2, '0')}-${_selectedDateTime!.day.toString().padLeft(2, '0')} ${_selectedDateTime!.hour.toString().padLeft(2, '0')}:${_selectedDateTime!.minute.toString().padLeft(2, '0')}:00';
+
+                        final created = await ApiService.createShipment({
+                          'shipperId': shipperId,
+                          'weightKg':
+                              double.tryParse(_weightController.text.trim()) ?? 0.0,
+                          'cargoDescription': _cargoTypeController.text.trim(),
+                          'pickupAddress': _fromController.text.trim(),
+                          'dropoffAddress': _toController.text.trim(),
+                          'basePrice':
+                              double.tryParse(_basePriceController.text.trim()) ?? 0.0,
+                          'expectedDeliveryDate': formattedDate,
+                        });
+
+                        debugPrint('Shipment created successfully: $created');
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('تم نشر الشحنة بنجاح'),
                           ),
                         );
                         Navigator.of(context).pop();
+                      } catch (e) {
+                        setState(() => _isSubmitting = false);
+                        debugPrint('Shipment creation error: $e');
+                        String errorMessage = 'خطأ: يرجى التأكد من تعبئة جميع الحقول';
+                        if (e.toString().contains('جميع الحقول مطلوبة')) {
+                          errorMessage = 'خطأ: يرجى التأكد من تعبئة جميع الحقول';
+                        } else if (e.toString().contains('السعر الأساسي يجب أن يكون أكبر من صفر')) {
+                          errorMessage = 'خطأ: السعر الأساسي يجب أن يكون أكبر من صفر';
+                        } else if (e.toString().contains('الوزن يجب أن يكون أكبر من صفر')) {
+                          errorMessage = 'خطأ: الوزن يجب أن يكون أكبر من صفر';
+                        }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(errorMessage)),
+                        );
                       }
                     },
+                    child: _isSubmitting
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('حفظ ونشر الشحنة في السوق'),
                   ),
                 ],
               ),
@@ -449,9 +694,7 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
       controller: controller,
       keyboardType: keyboardType,
       maxLines: maxLines,
-      decoration: InputDecoration(
-        labelText: label,
-      ),
+      decoration: InputDecoration(labelText: label),
       validator: (value) {
         if (value == null || value.trim().isEmpty) {
           return validatorMsg;
@@ -463,18 +706,14 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
   }
 }
 
-
-
-/// شاشة صورية لقائمة العروض
-class ShipperBidsListScreen extends StatelessWidget {
-  const ShipperBidsListScreen({super.key});
+/// شاشة صورية لقائمة العروض (احتياطية)
+class ShipperBidsPlaceholderScreen extends StatelessWidget {
+  const ShipperBidsPlaceholderScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('عروض السائقين'),
-      ),
+      appBar: AppBar(title: const Text('عروض السائقين')),
       body: const Center(
         child: Text(
           'هنا سيتم عرض عروض السائقين (السعر، التقييم، الالتزام).',
@@ -492,9 +731,7 @@ class ShipperContractScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('العقد الإلكتروني'),
-      ),
+      appBar: AppBar(title: const Text('العقد الإلكتروني')),
       body: const Padding(
         padding: EdgeInsets.all(16),
         child: Directionality(
@@ -542,10 +779,7 @@ class ShipperNotificationsScreen extends StatelessWidget {
           Text(
             'ستظهر هنا تنبيهات التصعيد والتأخير عند ربط النظام الخلفي\n\n'
             'مثال: تنبيه قبل 24 ساعة من EDT، تنبيه بعد ساعة تأخير',
-            style: TextStyle(
-              fontSize: 14,
-              color: DarbakColors.textSecondary,
-            ),
+            style: TextStyle(fontSize: 14, color: DarbakColors.textSecondary),
             textAlign: TextAlign.center,
           ),
         ],
@@ -569,9 +803,14 @@ class ShipperMessagesScreen extends StatelessWidget {
           subtitle: const Text('حول شحنة الرياض - الدمام'),
           trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
           onTap: () {
-            Navigator.of(context).push(MaterialPageRoute(
-              builder: (_) => const ChatScreen(shipmentId: '0098', otherUser: 'السائق عبدالله'),
-            ));
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const ChatScreen(
+                  shipmentId: '0098',
+                  otherUser: 'السائق عبدالله',
+                ),
+              ),
+            );
           },
         ),
       ],
@@ -580,60 +819,191 @@ class ShipperMessagesScreen extends StatelessWidget {
 }
 
 /// شاشة الحساب (الشاحن/الشركة)
-class ShipperProfileScreen extends StatelessWidget {
+class ShipperProfileScreen extends StatefulWidget {
   const ShipperProfileScreen({super.key});
 
   @override
+  State<ShipperProfileScreen> createState() => _ShipperProfileScreenState();
+}
+
+class _ShipperProfileScreenState extends State<ShipperProfileScreen> {
+  final _formKey = GlobalKey<FormState>();
+  bool _loading = true;
+  bool _isEditing = false;
+  Map<String, dynamic>? _user;
+
+  late TextEditingController _fullNameController;
+  late TextEditingController _emailController;
+  late TextEditingController _phoneController;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt('user_id');
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('لم يتم العثور على بيانات المستخدم')),
+      );
+      setState(() => _loading = false);
+      return;
+    }
+
+    try {
+      final profile = await ApiService.getProfile(userId);
+      _fullNameController = TextEditingController(text: profile['full_name']);
+      _emailController = TextEditingController(text: profile['email']);
+      _phoneController = TextEditingController(text: profile['phone']);
+      setState(() {
+        _user = profile;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('فشل في تحميل الملف الشخصي: $e')));
+    }
+  }
+
+  Future<void> _updateProfile() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getInt('user_id');
+    if (userId == null) return;
+
+    setState(() => _loading = true);
+    try {
+      await ApiService.updateProfile(userId, {
+        'fullName': _fullNameController.text.trim(),
+        'email': _emailController.text.trim(),
+        'phone': _phoneController.text.trim(),
+        'licenseNo': _user?['license_no'],
+        'commercialNo': _user?['commercial_no'],
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('تم تحديث البيانات بنجاح')));
+      _isEditing = false;
+      await _loadProfile();
+    } catch (e) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('خطأ في تحديث التفاصيل: $e')));
+      setState(() => _loading = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_user == null)
+      return const Center(child: Text('لا يوجد بيانات مستخدم'));
+
     return Scaffold(
-      appBar: AppBar(title: const Text('ملف الشركة')),
+      appBar: AppBar(
+        title: const Text('ملف الشركة'),
+        actions: [
+          if (!_isEditing)
+            IconButton(
+              icon: const Icon(Icons.edit),
+              onPressed: () => setState(() => _isEditing = true),
+            )
+          else
+            IconButton(icon: const Icon(Icons.save), onPressed: _updateProfile),
+        ],
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const DarbakSectionTitle(title: 'معلومات الشركة'),
-            const SizedBox(height: 10),
-            _buildInfoCard('اسم الشركة', 'دربك للنقل'),
-            _buildInfoCard('السجل التجاري', '1010265071'),
-            _buildInfoCard('الـ VAT', '300205584400003'),
-            _buildInfoCard('العنوان', 'الرياض، حي السليمانية'),
-            const SizedBox(height: 16),
-            const DarbakSectionTitle(title: 'تفاصيل الاتصال'),
-            const SizedBox(height: 8),
-            _buildInfoCard('البريد الإلكتروني', 'info@darbak.sa'),
-            _buildInfoCard('الهاتف', '+966555000111'),
-            const SizedBox(height: 16),
-            const DarbakSectionTitle(title: 'تقييم الأداء'),
-            const SizedBox(height: 10),
-            Card(
-              elevation: 0,
-              color: DarbakColors.cardBackground,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                  children: const [
-                    Icon(Icons.star, color: DarbakColors.warningYellow),
-                    SizedBox(width: 8),
-                    Text('4.7 / 5.0', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                    Spacer(),
-                    Text('851 تقييم', style: TextStyle(color: DarbakColors.textSecondary)),
-                  ],
-                ),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                controller: _fullNameController,
+                decoration: const InputDecoration(labelText: 'الاسم الكامل'),
+                enabled: _isEditing,
+                validator: (value) =>
+                    (value == null || value.isEmpty) ? 'مطلوب' : null,
               ),
-            ),
-            const SizedBox(height: 20),
-            DarbakOutlinedButton(
-              label: 'تحديث بيانات الشركة',
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('قريباً: واجهة تحديث بيانات الشركة')));
-              },
-            ),
-          ],
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _emailController,
+                decoration: const InputDecoration(
+                  labelText: 'البريد الإلكتروني',
+                ),
+                enabled: _isEditing,
+                validator: (value) =>
+                    (value == null || value.isEmpty) ? 'مطلوب' : null,
+              ),
+              const SizedBox(height: 10),
+              TextFormField(
+                controller: _phoneController,
+                decoration: const InputDecoration(labelText: 'رقم الجوال'),
+                enabled: _isEditing,
+                validator: (value) =>
+                    (value == null || value.isEmpty) ? 'مطلوب' : null,
+              ),
+              const SizedBox(height: 20),
+              if (!_isEditing) ...[
+                _buildInfoCard('الشركة', _user?['full_name'] ?? ''),
+                _buildInfoCard(
+                  'حالة التحقق',
+                  _user?['verification_status'] ?? '',
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: _logout,
+                  icon: const Icon(Icons.logout),
+                  label: const Text('تسجيل الخروج'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red[400],
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ],
+            ],
+          ),
         ),
       ),
     );
+  }
+
+  Future<void> _logout() async {
+    final confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('تأكيد تسجيل الخروج'),
+            content: const Text('هل تريد فعلاً تسجيل الخروج؟'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('الغاء'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('تسجيل الخروج'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (!confirmed) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+
+    Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
   }
 
   Widget _buildInfoCard(String title, String value) {

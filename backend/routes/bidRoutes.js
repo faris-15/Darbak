@@ -9,8 +9,8 @@ router.post(
   [
     body('shipmentId').isInt(),
     body('driverId').isInt(),
-    body('amount').isNumeric(),
-    body('etaDays').isInt(),
+    body('bidAmount').isNumeric(),
+    body('estimatedDays').isInt(),
   ],
   (req, res) => {
     const errors = validationResult(req);
