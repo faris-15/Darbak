@@ -8,7 +8,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'secret_key';
 
 const register = async (req, res) => {
   try {
-    const { fullName, email, phone, password, role = 'driver', licenseNo = null, commercialNo = null, documentPath = null } = req.body;
+    const { fullName, email, phone, password, role = 'driver', licenseNo = null, commercialNo = null, documentPath = null, issueDate = null, expiryDate = null } = req.body;
+
+    console.log('[register] Input:', { fullName, email, phone, role, issueDate, expiryDate });
 
     // Validate required fields
     if (!fullName || fullName.trim() === '') {
@@ -41,20 +43,23 @@ const register = async (req, res) => {
     }
 
     const hashed = await bcrypt.hash(password, 10);
-    const user = await User.create({ fullName, email, phone, password: hashed, role, licenseNo, commercialNo, documentPath });
+    const user = await User.create({ fullName, email, phone, password: hashed, role, licenseNo, commercialNo, documentPath, issueDate, expiryDate });
     await Wallet.createForUser(user.id);
 
     const token = jwt.sign({ id: user.id, role }, JWT_SECRET, { expiresIn: '30d' });
+    console.log('[register] Success:', { userId: user.id, role });
     res.status(201).json({ user, token });
   } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({ message: 'خطأ في الخادم أثناء التسجيل' });
+    console.error('[register] Database error:', error.message, 'Code:', error.code, 'SQLState:', error.sqlState);
+    res.status(500).json({ message: error.message || 'خطأ في الخادم أثناء التسجيل' });
   }
 };
 
 const login = async (req, res) => {
   try {
     const { identifier, password } = req.body;
+
+    console.log('[login] Attempt:', { identifier });
 
     if (!identifier || !password) {
       return res.status(400).json({ message: 'رقم الجوال/البريد الإلكتروني وكلمة المرور مطلوبان' });
@@ -71,6 +76,7 @@ const login = async (req, res) => {
     }
 
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
+    console.log('[login] Success:', { userId: user.id, role: user.role });
     res.json({
       user: {
         id: user.id,
@@ -84,8 +90,8 @@ const login = async (req, res) => {
       token,
     });
   } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({ message: 'خطأ في الخادم أثناء تسجيل الدخول' });
+    console.error('[login] Database error:', error.message, 'Code:', error.code, 'SQLState:', error.sqlState);
+    res.status(500).json({ message: error.message || 'خطأ في الخادم أثناء تسجيل الدخول' });
   }
 };
 

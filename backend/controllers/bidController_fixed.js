@@ -72,6 +72,7 @@ const createBid = async (req, res) => {
       });
     } catch (notifError) {
       console.warn('[Bid.createBid] Notification error:', notifError.message);
+      // Don't fail the bid creation if notification fails
     }
 
     res.status(201).json({ 

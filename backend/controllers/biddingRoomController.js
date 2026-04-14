@@ -1,43 +1,62 @@
-const BiddingRoom = require('../models/BiddingRoom');
+const pool = require('../config/db');
 const Bid = require('../models/Bid');
-const Notification = require('../models/Notification');
+const Shipment = require('../models/Shipment');
+
+/**
+ * A "Bidding Room" is the collection of all bids for a single shipment.
+ * This controller manages the bidding process for a shipment.
+ */
 
 const enterBiddingRoom = async (req, res) => {
   try {
     const { shipmentId } = req.params;
-    const { driverId } = req.body;
+    const { driverId, bidAmount, estimatedDays } = req.body;
 
-    console.log('Enter Room Data:', { shipmentId, driverId });
+    console.log('[BiddingRoom.enterBiddingRoom] Input:', { shipmentId, driverId, bidAmount, estimatedDays });
 
-    if (!shipmentId || !driverId) {
-      return res.status(400).json({ message: 'shipmentId و driverId مطلوبان' });
+    // Validate inputs
+    if (!shipmentId || !driverId || !bidAmount || !estimatedDays) {
+      return res.status(400).json({ message: 'shipmentId, دriverId, bidAmount, estimatedDays مطلوبة' });
     }
 
-    const room = await BiddingRoom.findByShipmentId(shipmentId);
-    if (!room) {
-      return res.status(404).json({ message: 'غرفة المناقصة غير موجودة' });
+    // Verify shipment exists
+    const shipment = await Shipment.findById(shipmentId);
+    if (!shipment) {
+      return res.status(404).json({ message: 'الشحنة غير موجودة' });
     }
 
-    if (room.room_status !== 'open') {
-      return res.status(400).json({ message: 'هذه الغرفة مغلقة' });
+    // Check if shipment is still in bidding status
+    if (shipment.status !== 'bidding') {
+      return res.status(400).json({ message: 'هذه الشحنة لا تقبل عروض جديدة' });
     }
 
-    // Check if driver is already in another room
-    const activeRooms = await BiddingRoom.getActiveRoomsForDriver(driverId);
-    if (activeRooms.length > 0) {
-      return res.status(403).json({
-        message: 'أنت بالفعل في غرفة مناقصة أخرى. يرجى مغادرة الغرفة الأخرى أولاً.',
-        activeRoom: activeRooms[0],
-      });
+    // Check if driver already has a pending bid for this shipment
+    const existingBid = await pool.execute(
+      'SELECT * FROM bids WHERE shipment_id = ? AND driver_id = ? AND bid_status = ?',
+      [shipmentId, driverId, 'pending']
+    );
+    const [existingBids] = existingBid;
+
+    if (existingBids && existingBids.length > 0) {
+      return res.status(400).json({ message: 'لديك بالفعل عرض معلق لهذه الشحنة' });
     }
 
-    await BiddingRoom.enterRoom(shipmentId, driverId);
-    const updatedRoom = await BiddingRoom.findByShipmentId(shipmentId);
+    // Place the bid
+    const newBid = await Bid.create({
+      shipmentId,
+      driverId,
+      bidAmount: Number(bidAmount),
+      estimatedDays: Number(estimatedDays),
+    });
 
-    res.json({ message: 'دخلت الغرفة بنجاح', room: updatedRoom });
+    console.log('[BiddingRoom.enterBiddingRoom] Bid placed:', { bidId: newBid.id, bidAmount, driverId });
+
+    // Return the updated room status
+    const roomStatus = await _getRoomStatus(shipmentId);
+    res.json({ message: 'تم تقديم العرض بنجاح', bid: newBid, room: roomStatus });
   } catch (error) {
-    console.error('Enter room error:', error);
-    res.status(500).json({ message: error.message || 'خطأ في الدخول للغرفة' });
+    console.error('[BiddingRoom.enterBiddingRoom] Database error:', error.message, 'Code:', error.code, 'SQLState:', error.sqlState);
+    res.status(500).json({ message: error.message || 'خطأ في تقديم العرض' });
   }
 };
 
@@ -46,32 +65,46 @@ const exitBiddingRoom = async (req, res) => {
     const { shipmentId } = req.params;
     const { driverId } = req.body;
 
-    const room = await BiddingRoom.findByShipmentId(shipmentId);
-    if (!room) {
-      return res.status(404).json({ message: 'غرفة المناقصة غير موجودة' });
+    console.log('[BiddingRoom.exitBiddingRoom] Input:', { shipmentId, driverId });
+
+    // Find driver's bid for this shipment
+    const [driverBids] = await pool.execute(
+      'SELECT * FROM bids WHERE shipment_id = ? AND driver_id = ? AND bid_status = ?',
+      [shipmentId, driverId, 'pending']
+    );
+
+    if (!driverBids || driverBids.length === 0) {
+      return res.status(404).json({ message: 'لم نجد عرضاً معلقاً لك في هذه الشحنة' });
     }
 
-    if (room.lowest_bidder_id == driverId) {
+    const driverBid = driverBids[0];
+
+    // Get the lowest bid
+    const [allBids] = await pool.execute(
+      'SELECT * FROM bids WHERE shipment_id = ? AND bid_status = ? ORDER BY bid_amount ASC LIMIT 1',
+      [shipmentId, 'pending']
+    );
+
+    // Check if driver is the lowest bidder
+    if (allBids && allBids.length > 0 && allBids[0].driver_id == driverId) {
       return res.status(403).json({
         message: 'أنت الفائز الحالي بأقل سعر. لا يمكنك مغادرة الغرفة الآن.',
       });
     }
 
-    await BiddingRoom.exitRoom(shipmentId, driverId);
-
-    // Retract all bids from this driver (if not lowest)
-    const driverBids = await Bid.findByShipmentAndDriver(shipmentId, driverId);
-    for (const bid of driverBids) {
-      if (bid.bid_status === 'pending') {
-        await Bid.setStatus(bid.id, 'rejected');
-      }
+    // Reject the driver's bid
+    const updated = await Bid.setStatus(driverBid.id, 'rejected');
+    if (!updated) {
+      throw new Error('Failed to update bid status');
     }
 
-    const updatedRoom = await BiddingRoom.findByShipmentId(shipmentId);
-    res.json({ message: 'غادرت الغرفة بنجاح. تم إلغاء جميع عروضك.', room: updatedRoom });
+    console.log('[BiddingRoom.exitBiddingRoom] Bid rejected:', { bidId: driverBid.id, driverId });
+
+    const roomStatus = await _getRoomStatus(shipmentId);
+    res.json({ message: 'تم إلغاء عرضك بنجاح', room: roomStatus });
   } catch (error) {
-    console.error('Exit room error:', error);
-    res.status(500).json({ message: error.message || 'خطأ في مغادرة الغرفة' });
+    console.error('[BiddingRoom.exitBiddingRoom] Database error:', error.message, 'Code:', error.code, 'SQLState:', error.sqlState);
+    res.status(500).json({ message: error.message || 'خطأ في إلغاء العرض' });
   }
 };
 
@@ -79,16 +112,52 @@ const getRoomStatus = async (req, res) => {
   try {
     const { shipmentId } = req.params;
 
-    const room = await BiddingRoom.findByShipmentId(shipmentId);
-    if (!room) {
-      return res.status(404).json({ message: 'غرفة المناقصة غير موجودة' });
+    console.log('[BiddingRoom.getRoomStatus] Fetching status for shipmentId:', shipmentId);
+
+    // Verify shipment exists
+    const shipment = await Shipment.findById(shipmentId);
+    if (!shipment) {
+      return res.status(404).json({ message: 'الشحنة غير موجودة' });
     }
 
-    res.json(room);
+    const roomStatus = await _getRoomStatus(shipmentId);
+    console.log('[BiddingRoom.getRoomStatus] Success:', roomStatus);
+    res.json(roomStatus);
   } catch (error) {
-    console.error('Get room status error:', error);
-    res.status(500).json({ message: 'خطأ في جلب حالة الغرفة' });
+    console.error('[BiddingRoom.getRoomStatus] Database error:', error.message, 'Code:', error.code, 'SQLState:', error.sqlState);
+    res.status(500).json({ message: error.message || 'خطأ في جلب حالة الغرفة' });
   }
 };
+
+/**
+ * Helper function to get complete room status (all bids for a shipment)
+ */
+async function _getRoomStatus(shipmentId) {
+  try {
+    const [allBids] = await pool.execute(
+      'SELECT * FROM bids WHERE shipment_id = ? AND bid_status = ? ORDER BY bid_amount ASC',
+      [shipmentId, 'pending']
+    );
+
+    const lowestBid = allBids && allBids.length > 0 ? allBids[0] : null;
+    const totalBidders = allBids ? allBids.length : 0;
+
+    return {
+      shipment_id: shipmentId,
+      total_bids: totalBidders,
+      lowest_bid: lowestBid ? {
+        id: lowestBid.id,
+        driver_id: lowestBid.driver_id,
+        bid_amount: lowestBid.bid_amount,
+        estimated_days: lowestBid.estimated_days,
+      } : null,
+      all_bids: allBids || [],
+      room_status: totalBidders > 0 ? 'open' : 'empty',
+    };
+  } catch (error) {
+    console.error('[_getRoomStatus] Database error:', error.message, 'Code:', error.code);
+    throw error;
+  }
+}
 
 module.exports = { enterBiddingRoom, exitBiddingRoom, getRoomStatus };

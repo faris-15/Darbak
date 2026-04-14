@@ -1,10 +1,10 @@
 const pool = require('../config/db');
 
 const User = {
-  create: async ({ fullName, email, phone, password, role = 'driver', licenseNo = null, commercialNo = null, documentPath = null }) => {
+  create: async ({ fullName, email, phone, password, role = 'driver', licenseNo = null, commercialNo = null, documentPath = null, issueDate = null, expiryDate = null }) => {
     const [result] = await pool.execute(
-      'INSERT INTO users (full_name, email, phone, password, role, license_no, commercial_no, document_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [fullName, email, phone, password, role, licenseNo, commercialNo, documentPath]
+      'INSERT INTO users (full_name, email, phone, password, role, license_no, commercial_no, document_path, issue_date, expiry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [fullName, email, phone, password, role, licenseNo, commercialNo, documentPath, issueDate, expiryDate]
     );
     return {
       id: result.insertId,
@@ -16,6 +16,8 @@ const User = {
       license_no: licenseNo,
       commercial_no: commercialNo,
       document_path: documentPath,
+      issue_date: issueDate,
+      expiry_date: expiryDate,
     };
   },
 

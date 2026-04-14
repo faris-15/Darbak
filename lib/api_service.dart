@@ -2,90 +2,122 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  static const String baseUrl = 'http://localhost:5000/api';
+  static const String baseUrl = 'http://127.0.0.1:5000/api';
 
   static Future<Map<String, dynamic>> login(
     String identifier,
     String password,
   ) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/auth/login'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'identifier': identifier, 'password': password}),
-    );
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception(jsonDecode(response.body)['message'] ?? 'Login failed');
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/auth/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'identifier': identifier, 'password': password}),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        final error = jsonDecode(response.body);
+        throw Exception(error['message'] ?? 'Login failed');
+      }
+    } catch (e) {
+      print('[ApiService.login] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
   static Future<Map<String, dynamic>> register(
     Map<String, dynamic> data,
   ) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/auth/register'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data),
-    );
-    if (response.statusCode == 201) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception(
-        jsonDecode(response.body)['message'] ?? 'Registration failed',
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/auth/register'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
       );
+      if (response.statusCode == 201) {
+        return jsonDecode(response.body);
+      } else {
+        final error = jsonDecode(response.body);
+        throw Exception(error['message'] ?? 'Registration failed');
+      }
+    } catch (e) {
+      print('[ApiService.register] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
   static Future<List<dynamic>> getShipments() async {
-    final response = await http.get(Uri.parse('$baseUrl/shipments'));
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception('Failed to load shipments');
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/shipments'));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to load shipments');
+      }
+    } catch (e) {
+      print('[ApiService.getShipments] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
   static Future<Map<String, dynamic>> createShipment(
     Map<String, dynamic> data,
   ) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/shipments'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data),
-    );
-    if (response.statusCode == 201) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception('Failed to create shipment');
+    try {
+      print('[ApiService.createShipment] Payload: $data');
+      final response = await http.post(
+        Uri.parse('$baseUrl/shipments'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
+      );
+      if (response.statusCode == 201) {
+        return jsonDecode(response.body);
+      } else {
+        final error = jsonDecode(response.body);
+        throw Exception(error['message'] ?? 'Failed to create shipment');
+      }
+    } catch (e) {
+      print('[ApiService.createShipment] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
   static Future<List<dynamic>> getBids(int shipmentId) async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/bids/shipment/$shipmentId'),
-    );
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception('Failed to load bids');
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/bids/shipment/$shipmentId'),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to load bids');
+      }
+    } catch (e) {
+      print('[ApiService.getBids] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
   static Future<Map<String, dynamic>> placeBid(
     Map<String, dynamic> data,
   ) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/bids'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data),
-    );
-    if (response.statusCode == 201) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception(
-        jsonDecode(response.body)['message'] ?? 'Failed to place bid',
+    try {
+      print('[ApiService.placeBid] Payload: $data');
+      final response = await http.post(
+        Uri.parse('$baseUrl/bids'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
       );
+      if (response.statusCode == 201) {
+        return jsonDecode(response.body);
+      } else {
+        final error = jsonDecode(response.body);
+        throw Exception(error['message'] ?? 'Failed to place bid');
+      }
+    } catch (e) {
+      print('[ApiService.placeBid] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
@@ -93,24 +125,34 @@ class ApiService {
     int userId,
     Map<String, dynamic> data,
   ) async {
-    final response = await http.put(
-      Uri.parse('$baseUrl/auth/profile/$userId'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data),
-    );
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception('Failed to update profile');
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/auth/profile/$userId'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
+      );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to update profile');
+      }
+    } catch (e) {
+      print('[ApiService.updateProfile] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
   static Future<Map<String, dynamic>> getProfile(int userId) async {
-    final response = await http.get(Uri.parse('$baseUrl/auth/profile/$userId'));
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception('Failed to load profile');
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/auth/profile/$userId'));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to load profile');
+      }
+    } catch (e) {
+      print('[ApiService.getProfile] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
@@ -118,18 +160,31 @@ class ApiService {
   static Future<Map<String, dynamic>> enterBiddingRoom(
     int shipmentId,
     int driverId,
+    double bidAmount,
+    int estimatedDays,
   ) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/bidding-rooms/rooms/$shipmentId/enter'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'driverId': driverId}),
-    );
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception(
-        jsonDecode(response.body)['message'] ?? 'Failed to enter room',
+    try {
+      print('[ApiService.enterBiddingRoom] Input: shipmentId=$shipmentId, driverId=$driverId, bidAmount=$bidAmount, estimatedDays=$estimatedDays');
+      final response = await http.post(
+        Uri.parse('$baseUrl/bidding-rooms/rooms/$shipmentId/enter'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'driverId': driverId,
+          'bidAmount': bidAmount,
+          'estimatedDays': estimatedDays,
+        }),
       );
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        print('[ApiService.enterBiddingRoom] Success');
+        return result;
+      } else {
+        final error = jsonDecode(response.body);
+        throw Exception(error['message'] ?? 'Failed to place bid');
+      }
+    } catch (e) {
+      print('[ApiService.enterBiddingRoom] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
@@ -137,28 +192,43 @@ class ApiService {
     int shipmentId,
     int driverId,
   ) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/bidding-rooms/rooms/$shipmentId/exit'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'driverId': driverId}),
-    );
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception(
-        jsonDecode(response.body)['message'] ?? 'Failed to exit room',
+    try {
+      print('[ApiService.exitBiddingRoom] Input: shipmentId=$shipmentId, driverId=$driverId');
+      final response = await http.post(
+        Uri.parse('$baseUrl/bidding-rooms/rooms/$shipmentId/exit'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'driverId': driverId}),
       );
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        print('[ApiService.exitBiddingRoom] Success');
+        return result;
+      } else {
+        final error = jsonDecode(response.body);
+        throw Exception(error['message'] ?? 'Failed to withdraw bid');
+      }
+    } catch (e) {
+      print('[ApiService.exitBiddingRoom] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
   static Future<Map<String, dynamic>> getRoomStatus(int shipmentId) async {
-    final response = await http.get(
-      Uri.parse('$baseUrl/bidding-rooms/rooms/$shipmentId/status'),
-    );
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception('Failed to get room status');
+    try {
+      print('[ApiService.getRoomStatus] Fetching status for shipmentId=$shipmentId');
+      final response = await http.get(
+        Uri.parse('$baseUrl/bidding-rooms/rooms/$shipmentId/status'),
+      );
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        print('[ApiService.getRoomStatus] Success: ${result['total_bids']} bids');
+        return result;
+      } else {
+        throw Exception('Failed to get room status');
+      }
+    } catch (e) {
+      print('[ApiService.getRoomStatus] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
@@ -166,26 +236,35 @@ class ApiService {
   static Future<Map<String, dynamic>> registerTruck(
     Map<String, dynamic> data,
   ) async {
-    final response = await http.post(
-      Uri.parse('$baseUrl/trucks/register'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data),
-    );
-    if (response.statusCode == 201) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception(
-        jsonDecode(response.body)['message'] ?? 'Failed to register truck',
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/trucks/register'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
       );
+      if (response.statusCode == 201) {
+        return jsonDecode(response.body);
+      } else {
+        final error = jsonDecode(response.body);
+        throw Exception(error['message'] ?? 'Failed to register truck');
+      }
+    } catch (e) {
+      print('[ApiService.registerTruck] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
   static Future<Map<String, dynamic>> getTruckByDriver(int driverId) async {
-    final response = await http.get(Uri.parse('$baseUrl/trucks/$driverId'));
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception('Truck not found');
+    try {
+      final response = await http.get(Uri.parse('$baseUrl/trucks/$driverId'));
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Truck not found');
+      }
+    } catch (e) {
+      print('[ApiService.getTruckByDriver] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
@@ -193,26 +272,34 @@ class ApiService {
     int truckId,
     Map<String, dynamic> data,
   ) async {
-    final response = await http.put(
-      Uri.parse('$baseUrl/trucks/$truckId'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(data),
-    );
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception(
-        jsonDecode(response.body)['message'] ?? 'Failed to update truck',
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/trucks/$truckId'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(data),
       );
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        final error = jsonDecode(response.body);
+        throw Exception(error['message'] ?? 'Failed to update truck');
+      }
+    } catch (e) {
+      print('[ApiService.updateTruck] Error: $e');
+      throw Exception(e.toString());
     }
   }
 
   static Future<void> deleteTruck(int truckId) async {
-    final response = await http.delete(Uri.parse('$baseUrl/trucks/$truckId'));
-    if (response.statusCode != 200) {
-      throw Exception(
-        jsonDecode(response.body)['message'] ?? 'Failed to delete truck',
-      );
+    try {
+      final response = await http.delete(Uri.parse('$baseUrl/trucks/$truckId'));
+      if (response.statusCode != 200) {
+        final error = jsonDecode(response.body);
+        throw Exception(error['message'] ?? 'Failed to delete truck');
+      }
+    } catch (e) {
+      print('[ApiService.deleteTruck] Error: $e');
+      throw Exception(e.toString());
     }
   }
 

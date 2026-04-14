@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 
 class AppColors {
@@ -49,25 +48,7 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
     final basePrice = widget.shipmentData['base_price'] ?? 0;
     _priceController.text = basePrice.toString();
     _daysController.text = '5';
-    _enterRoom();
     _loadExistingBids();
-  }
-
-  Future<void> _enterRoom() async {
-    try {
-      await ApiService.enterBiddingRoom(widget.shipmentId, widget.driverId);
-    } catch (e) {
-      print('Error entering room: $e');
-      // Show error to user
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('فشل في الدخول للغرفة: $e'),
-            backgroundColor: AppColors.danger,
-          ),
-        );
-      }
-    }
   }
 
   Future<void> _loadExistingBids() async {
@@ -158,12 +139,12 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
       final bidAmount = double.parse(_priceController.text);
       final estimatedDays = int.tryParse(_daysController.text) ?? 5;
 
-      await ApiService.placeBid({
-        'shipmentId': widget.shipmentId,
-        'driverId': widget.driverId,
-        'bidAmount': bidAmount,
-        'estimatedDays': estimatedDays,
-      });
+      await ApiService.enterBiddingRoom(
+        widget.shipmentId,
+        widget.driverId,
+        bidAmount,
+        estimatedDays,
+      );
 
       if (mounted) {
         setState(() {

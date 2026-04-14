@@ -29,7 +29,7 @@ class _SplashScreenState extends State<SplashScreen>
         // Ensure minimum 4 seconds, but since animation completed, navigate
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) {
-            _navigateToChooseRole(context);
+            _navigateToLogin(context);
           }
         });
       }
@@ -38,7 +38,7 @@ class _SplashScreenState extends State<SplashScreen>
     Future.delayed(const Duration(seconds: 5), () {
       if (mounted && !_controller.isCompleted) {
         _controller.stop();
-        _navigateToChooseRole(context);
+        _navigateToLogin(context);
       }
     });
   }
@@ -49,12 +49,12 @@ class _SplashScreenState extends State<SplashScreen>
     super.dispose();
   }
 
-  Future<void> _navigateToChooseRole(BuildContext context) async {
+  Future<void> _navigateToLogin(BuildContext context) async {
     final prefs = await SharedPreferences.getInstance();
     final isLoggedIn = prefs.getBool('is_logged_in') ?? false;
     final savedRole = prefs.getString('user_role');
 
-    Widget target = const ChooseRoleScreen();
+    Widget target = const LoginScreen();
 
     if (isLoggedIn && savedRole != null) {
       if (savedRole == 'driver') {
@@ -62,7 +62,7 @@ class _SplashScreenState extends State<SplashScreen>
       } else if (savedRole == 'shipper') {
         target = const ShipperHomeScreen();
       } else {
-        target = const ChooseRoleScreen();
+        target = const LoginScreen();
       }
     }
 
@@ -200,7 +200,7 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
                   onPressed: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => LoginScreen(role: _selectedRole),
+                        builder: (_) => const LoginScreen(),
                       ),
                     );
                   },
@@ -322,9 +322,7 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
 
 /// صفحة تسجيل الدخول
 class LoginScreen extends StatefulWidget {
-  final String role; // 'driver' or 'shipper'
-
-  const LoginScreen({super.key, required this.role});
+  const LoginScreen({super.key});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -383,12 +381,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final String roleLabel = widget.role == 'driver'
-        ? 'سائق'
-        : 'شركة/صاحب شحنة';
-
     return Scaffold(
-      appBar: AppBar(title: Text('تسجيل الدخول - $roleLabel')),
+      appBar: AppBar(title: const Text('تسجيل الدخول')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -410,9 +404,9 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
+                    const Text(
                       'رقم الجوال / البريد الإلكتروني',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13,
                         color: DarbakColors.textSecondary,
                       ),
@@ -491,12 +485,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     TextButton(
                       onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                RegistrationScreen(role: widget.role),
-                          ),
-                        );
+                        Navigator.of(context).pushNamed('/roleSelection');
                       },
                       child: const Text(
                         'سجل الآن',
@@ -535,6 +524,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   final _emailController = TextEditingController();
   final _licenseNoController = TextEditingController();
   final _commercialNoController = TextEditingController();
+  final _issueDateController = TextEditingController();
+  final _expiryDateController = TextEditingController();
 
   String? _documentPath;
   bool _loading = false;
@@ -546,6 +537,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     _passwordController.dispose();
     _licenseNoController.dispose();
     _commercialNoController.dispose();
+    _issueDateController.dispose();
+    _expiryDateController.dispose();
     super.dispose();
   }
 
@@ -594,6 +587,12 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             ? _commercialNoController.text.trim()
             : null,
         'documentPath': _documentPath,
+        'issueDate': widget.role == 'driver'
+            ? _issueDateController.text.trim()
+            : null,
+        'expiryDate': widget.role == 'driver'
+            ? _expiryDateController.text.trim()
+            : null,
       };
 
       await ApiService.register(data);
@@ -672,13 +671,50 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             title: const Text('بيانات إضافية'),
             content: Column(
               children: [
-                if (widget.role == 'driver')
+                if (widget.role == 'driver') ...[
                   TextFormField(
                     controller: _licenseNoController,
                     decoration: const InputDecoration(
                       labelText: 'رقم رخصة القيادة',
                     ),
                   ),
+                  TextFormField(
+                    controller: _issueDateController,
+                    decoration: const InputDecoration(
+                      labelText: 'تاريخ الإصدار',
+                    ),
+                    readOnly: true,
+                    onTap: () async {
+                      DateTime? picked = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime(1900),
+                        lastDate: DateTime(2100),
+                      );
+                      if (picked != null) {
+                        _issueDateController.text = picked.toIso8601String().split('T')[0];
+                      }
+                    },
+                  ),
+                  TextFormField(
+                    controller: _expiryDateController,
+                    decoration: const InputDecoration(
+                      labelText: 'تاريخ الانتهاء',
+                    ),
+                    readOnly: true,
+                    onTap: () async {
+                      DateTime? picked = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime(1900),
+                        lastDate: DateTime(2100),
+                      );
+                      if (picked != null) {
+                        _expiryDateController.text = picked.toIso8601String().split('T')[0];
+                      }
+                    },
+                  ),
+                ],
                 if (widget.role == 'shipper')
                   TextFormField(
                     controller: _commercialNoController,
@@ -693,12 +729,12 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             title: const Text('رفع الوثائق'),
             content: Column(
               children: [
-                const Text('يرجى رفع الوثيقة المطلوبة (PDF)'),
+                Text('يرجى رفع ${widget.role == 'driver' ? 'رخصة القيادة' : 'السجل التجاري'} (PDF)'),
                 const SizedBox(height: 16),
                 ElevatedButton.icon(
                   onPressed: _pickDocument,
                   icon: const Icon(Icons.upload_file),
-                  label: const Text('اختر ملف'),
+                  label: Text(widget.role == 'driver' ? 'رفع رخصة القيادة' : 'رفع السجل التجاري'),
                 ),
                 if (_documentPath != null) Text('تم اختيار: $_documentPath'),
                 const SizedBox(height: 16),

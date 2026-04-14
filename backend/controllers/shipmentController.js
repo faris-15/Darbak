@@ -1,16 +1,17 @@
 const Shipment = require('../models/Shipment');
 const Bid = require('../models/Bid');
 const Wallet = require('../models/Wallet');
-const BiddingRoom = require('../models/BiddingRoom');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 
 const createShipment = async (req, res) => {
   try {
-    const { shipperId, weightKg, cargoDescription, pickupAddress, dropoffAddress, basePrice, expectedDeliveryDate } = req.body;
+    const { shipperId, weightKg, cargoDescription, pickupAddress, dropoffAddress, basePrice, expectedDeliveryDate, period } = req.body;
+
+    console.log('[createShipment] Input:', { shipperId, weightKg, period, basePrice, expectedDeliveryDate });
 
     // Validate all required fields
-    if (!shipperId || !weightKg || !pickupAddress || !dropoffAddress || !basePrice || !expectedDeliveryDate) {
+    if (!shipperId || !weightKg || !pickupAddress || !dropoffAddress || !basePrice || !expectedDeliveryDate || !period) {
       return res.status(400).json({ message: 'جميع الحقول مطلوبة' });
     }
 
@@ -42,20 +43,14 @@ const createShipment = async (req, res) => {
       dropoffAddress,
       basePrice: Number(basePrice),
       expectedDeliveryDate,
+      period,
     });
 
-    // Create bidding room for this shipment automatically (don't fail if it fails)
-    try {
-      await BiddingRoom.create(shipment.id);
-    } catch (biddingError) {
-      console.warn('Failed to create bidding room:', biddingError);
-    }
-
-    console.log('Shipment created successfully:', shipment);
+    console.log('[createShipment] Success:', { shipmentId: shipment.id, period });
     res.status(201).json(shipment);
   } catch (error) {
-    console.error('Create shipment error:', error);
-    res.status(500).json({ message: 'خطأ في إنشاء الشحنة' });
+    console.error('[createShipment] Database error:', error.message, 'Code:', error.code, 'SQLState:', error.sqlState);
+    res.status(500).json({ message: error.message || 'خطأ في إنشاء الشحنة' });
   }
 };
 

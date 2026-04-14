@@ -316,7 +316,8 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
   final TextEditingController _cargoTypeController = TextEditingController();
   final TextEditingController _basePriceController = TextEditingController();
 
-  DateTime? _selectedDateTime;
+  DateTime? _selectedDate;
+  String _selectedPeriod = 'morning';
   bool _isSubmitting = false;
 
   // بيانات موقع التحميل
@@ -340,7 +341,7 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
     super.dispose();
   }
 
-  Future<void> _pickDateTime() async {
+  Future<void> _pickDate() async {
     final DateTime? pickedDate = await showDatePicker(
       context: context,
       initialDate: DateTime.now().add(const Duration(days: 1)),
@@ -349,22 +350,9 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
     );
 
     if (pickedDate != null) {
-      final TimeOfDay? pickedTime = await showTimePicker(
-        context: context,
-        initialTime: TimeOfDay.now(),
-      );
-
-      if (pickedTime != null) {
-        setState(() {
-          _selectedDateTime = DateTime(
-            pickedDate.year,
-            pickedDate.month,
-            pickedDate.day,
-            pickedTime.hour,
-            pickedTime.minute,
-          );
-        });
-      }
+      setState(() {
+        _selectedDate = pickedDate;
+      });
     }
   }
 
@@ -563,8 +551,9 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                   ),
                   const SizedBox(height: 8),
 
+                  // Date picker
                   InkWell(
-                    onTap: _pickDateTime,
+                    onTap: _pickDate,
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
@@ -577,17 +566,36 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              _selectedDateTime != null
-                                  ? '${_selectedDateTime!.day}/${_selectedDateTime!.month}/${_selectedDateTime!.year} ${_selectedDateTime!.hour}:${_selectedDateTime!.minute.toString().padLeft(2, '0')}'
-                                  : 'اختر التاريخ والوقت',
+                              _selectedDate != null
+                                  ? '${_selectedDate!.day}/${_selectedDate!.month}/${_selectedDate!.year}'
+                                  : 'اختر التاريخ',
                               style: TextStyle(
-                                color: _selectedDateTime != null ? Colors.black : Colors.grey,
+                                color: _selectedDate != null ? Colors.black : Colors.grey,
                               ),
                             ),
                           ),
                         ],
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Period selection
+                  DropdownButtonFormField<String>(
+                    value: _selectedPeriod,
+                    decoration: const InputDecoration(
+                      labelText: 'فترة التسليم',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'morning', child: Text('صباحي (06:00 - 12:00)')),
+                      DropdownMenuItem(value: 'evening', child: Text('مسائي (12:00 - 18:00)')),
+                    ],
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedPeriod = value!;
+                      });
+                    },
                   ),
                   // if (_selectedDateTime == null) ...[
                   //   Padding(
@@ -603,7 +611,7 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                   ElevatedButton(
                     onPressed: _isSubmitting ? null : () async {
                       if (!(_formKey.currentState?.validate() ?? false)) return;
-                      if (_selectedDateTime == null) {
+                      if (_selectedDate == null) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text('يرجى تحديد موعد التسليم الأقصى'),
@@ -628,8 +636,8 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                       }
 
                       try {
-                        // Format date as YYYY-MM-DD HH:MM:SS
-                        final formattedDate = '${_selectedDateTime!.year.toString().padLeft(4, '0')}-${_selectedDateTime!.month.toString().padLeft(2, '0')}-${_selectedDateTime!.day.toString().padLeft(2, '0')} ${_selectedDateTime!.hour.toString().padLeft(2, '0')}:${_selectedDateTime!.minute.toString().padLeft(2, '0')}:00';
+                        // Format date as YYYY-MM-DD
+                        final formattedDate = '${_selectedDate!.year.toString().padLeft(4, '0')}-${_selectedDate!.month.toString().padLeft(2, '0')}-${_selectedDate!.day.toString().padLeft(2, '0')}';
 
                         final created = await ApiService.createShipment({
                           'shipperId': shipperId,
@@ -641,6 +649,7 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                           'basePrice':
                               double.tryParse(_basePriceController.text.trim()) ?? 0.0,
                           'expectedDeliveryDate': formattedDate,
+                          'period': _selectedPeriod,
                         });
 
                         debugPrint('Shipment created successfully: $created');

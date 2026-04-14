@@ -1,10 +1,10 @@
 const pool = require('../config/db');
 
 const Shipment = {
-  create: async ({ shipperId, weightKg, cargoDescription, pickupAddress, dropoffAddress, basePrice, expectedDeliveryDate }) => {
+  create: async ({ shipperId, weightKg, cargoDescription, pickupAddress, dropoffAddress, basePrice, expectedDeliveryDate, period }) => {
     const [result] = await pool.execute(
-      'INSERT INTO shipments (shipper_id, weight_kg, cargo_description, pickup_address, dropoff_address, base_price, expected_delivery_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [shipperId, weightKg, cargoDescription, pickupAddress, dropoffAddress, basePrice, expectedDeliveryDate, 'bidding']
+      'INSERT INTO shipments (shipper_id, weight_kg, cargo_description, pickup_address, dropoff_address, base_price, expected_delivery_date, period, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [shipperId, weightKg, cargoDescription, pickupAddress, dropoffAddress, basePrice, expectedDeliveryDate, period, 'bidding']
     );
     return {
       id: result.insertId,
@@ -15,6 +15,7 @@ const Shipment = {
       dropoff_address: dropoffAddress,
       base_price: basePrice,
       expected_delivery_date: expectedDeliveryDate,
+      period: period,
       status: 'bidding',
     };
   },
@@ -42,10 +43,12 @@ const Shipment = {
     const actual = new Date(actualDeliveryDate);
     let penaltyPercent = 0;
 
-    if (actual > expected) {
-      const msPerDay = 24 * 60 * 60 * 1000;
-      const daysLate = Math.ceil((actual - expected) / msPerDay);
-      penaltyPercent = Math.min(daysLate * 5, 25);
+    // Compare only dates, ignore time
+    const expectedDate = new Date(expected.getFullYear(), expected.getMonth(), expected.getDate());
+    const actualDate = new Date(actual.getFullYear(), actual.getMonth(), actual.getDate());
+
+    if (actualDate > expectedDate) {
+      penaltyPercent = 25;
     }
 
     const penaltyAmount = Number(((bidAmount * penaltyPercent) / 100).toFixed(2));

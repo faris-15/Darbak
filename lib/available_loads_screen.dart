@@ -562,7 +562,6 @@ class ShipmentCard extends StatelessWidget {
     
     // Calculate time left (placeholder - would come from real data)
     const timeLeft = '2:30 س';
-    final isButtonActive = true; // Can be set based on business logic
 
     return Container(
       decoration: BoxDecoration(

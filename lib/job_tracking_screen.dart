@@ -2,8 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'app_theme.dart';
 import 'app_widgets.dart';
 import 'api_service.dart';
@@ -27,7 +25,6 @@ class _JobTrackingScreenState extends State<JobTrackingScreen> {
   Map<String, dynamic>? _shipment;
   bool _isLoading = true;
   XFile? _podPhotoFile;
-  String? _podSignatureFile;
   bool _isSubmittingPOD = false;
 
   // Timeline steps
@@ -353,7 +350,6 @@ class _JobTrackingScreenState extends State<JobTrackingScreen> {
         final step = _timelineSteps[index];
         final isCompleted = index < currentStepIndex;
         final isActive = index == currentStepIndex;
-        final isUpcoming = index > currentStepIndex;
 
         return Padding(
           padding: EdgeInsets.only(

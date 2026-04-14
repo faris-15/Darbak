@@ -6,12 +6,15 @@ USE darbak_db;
 CREATE TABLE IF NOT EXISTS users (
     id INT(11) NOT NULL AUTO_INCREMENT,
     full_name VARCHAR(150) NOT NULL,
+    email VARCHAR(150) NOT NULL UNIQUE,
     phone VARCHAR(15) NOT NULL UNIQUE,
     password VARCHAR(255) NOT NULL,
     role ENUM('driver', 'shipper', 'admin') NOT NULL DEFAULT 'driver',
     license_no VARCHAR(50) NULL,
     commercial_no VARCHAR(50) NULL,
     document_path VARCHAR(255) NULL,
+    issue_date DATE NULL,
+    expiry_date DATE NULL,
     verification_status ENUM('pending', 'verified', 'rejected') DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
@@ -27,6 +30,7 @@ CREATE TABLE IF NOT EXISTS shipments (
     dropoff_address VARCHAR(255) NOT NULL,
     base_price DECIMAL(10,2) NOT NULL,
     final_price DECIMAL(10,2) NULL,
+    period INT(11) NULL COMMENT 'Time period in days',
     status ENUM('pending', 'bidding', 'assigned', 'on_way', 'delivered', 'cancelled') DEFAULT 'pending',
     expected_delivery_date DATETIME NOT NULL,
     actual_delivery_date DATETIME NULL,

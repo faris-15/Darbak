@@ -16,6 +16,11 @@ class DarbakApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: DarbakTheme.lightTheme,
       home: const SplashScreen(),
+      routes: {
+        '/login': (_) => const LoginScreen(),
+        '/roleSelection': (_) => const ChooseRoleScreen(),
+        '/splash': (_) => const SplashScreen(),
+      },
     );
   }
 }
