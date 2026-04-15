@@ -1,6 +1,7 @@
 const Bid = require('../models/Bid');
 const Shipment = require('../models/Shipment');
 const Notification = require('../models/Notification');
+const { decryptText } = require('../utils/encryption');
 const pool = require('../config/db');
 
 const createBid = async (req, res) => {
@@ -90,14 +91,187 @@ const getBidsByShipment = async (req, res) => {
 
     console.log('[Bid.getBidsByShipment] Fetching bids for shipmentId:', shipmentId);
 
-    const bids = await Bid.findByShipment(shipmentId);
+    const bids = await Bid.findByShipmentWithDriver(shipmentId);
     
-    console.log('[Bid.getBidsByShipment] Found', bids.length, 'bids');
-    res.json(bids);
+    console.log('[Bid.getBidsByShipment] Raw bids from DB:', JSON.stringify(bids, null, 2));
+
+    // Decrypt driver license_no for each bid
+    const bidsWithDecryption = bids.map(bid => {
+      console.log('Original Data from DB:', bid.license_no);
+      const rawLicense = bid.license_no;
+      let decryptedLicense = null;
+      if (rawLicense !== null && rawLicense !== undefined && rawLicense !== '') {
+        try {
+          decryptedLicense = decryptText(rawLicense);
+        } catch (error) {
+          console.error('[Bid.getBidsByShipment] Decryption failed for bid', bid.id, ':', error.message);
+          decryptedLicense = rawLicense; // Return original if decryption fails
+        }
+      }
+      const decrypted = {
+        ...bid,
+        license_no: decryptedLicense,
+      };
+      console.log('[Bid.getBidsByShipment] Bid:', decrypted.id, 'Driver:', decrypted.driver_name);
+      return decrypted;
+    });
+
+    const responseData = bidsWithDecryption.map((bid) => ({
+      ...bid,
+      driver_name: bid.driver_name || bid.full_name || bid.fullName || 'سائق',
+      bid_amount: parseFloat(bid.bid_amount) || 0.0,
+      estimated_days: parseInt(bid.estimated_days) || 0,
+      driver_rating: bid.driver_rating !== null ? Number(bid.driver_rating) : null,
+      rating_count: bid.rating_count !== null ? Number(bid.rating_count) : null,
+    }));
+
+    console.log('[Bid.getBidsByShipment] Found', responseData.length, 'bids');
+    console.log('Sending to Flutter:', JSON.stringify(responseData, null, 2));
+    res.json(responseData);
   } catch (error) {
     console.error('[Bid.getBidsByShipment] Database error:', error.message, 'Code:', error.code, 'SQLState:', error.sqlState);
     res.status(500).json({ message: error.message || 'خطأ في جلب العروض' });
   }
 };
 
-module.exports = { createBid, getBidsByShipment };
+const acceptBid = async (req, res) => {
+  try {
+    const { bidId } = req.params;
+
+    console.log('[Bid.acceptBid] Accepting bid:', bidId);
+
+    if (!bidId || isNaN(Number(bidId))) {
+      console.warn('[Bid.acceptBid] Invalid bidId:', bidId);
+      return res.status(400).json({ message: 'رقم العرض غير صالح' });
+    }
+
+    // Validate bid exists
+    const bid = await Bid.findById(bidId);
+    if (!bid) {
+      console.warn('[Bid.acceptBid] Bid not found:', bidId);
+      return res.status(404).json({ message: 'العرض غير موجود' });
+    }
+
+    console.log('[Bid.acceptBid] Bid found:', bid.id, 'Status:', bid.bid_status);
+
+    // Check bid is in pending status
+    if (bid.bid_status !== 'pending') {
+      console.warn('[Bid.acceptBid] Bid not in pending status:', bid.bid_status);
+      return res.status(400).json({ message: 'لا يمكن قبول هذا العرض' });
+    }
+
+    const shipmentId = bid.shipment_id;
+    const driverId = bid.driver_id;
+
+    if (!shipmentId || !driverId) {
+      console.error('[Bid.acceptBid] Missing required IDs:', { shipmentId, driverId });
+      return res.status(400).json({ message: 'بيانات الشحنة أو السائق غير مكتملة' });
+    }
+
+    // Check shipment exists and is in bidding status
+    const shipment = await Shipment.findById(shipmentId);
+    if (!shipment) {
+      console.warn('[Bid.acceptBid] Shipment not found:', shipmentId);
+      return res.status(404).json({ message: 'الشحنة غير موجودة' });
+    }
+
+    console.log('[Bid.acceptBid] Shipment found:', shipment.id, 'Status:', shipment.status);
+
+    if (shipment.status !== 'bidding') {
+      console.warn('[Bid.acceptBid] Shipment not in bidding status:', shipment.status);
+      return res.status(400).json({ message: 'الشحنة لا يمكن تعيين سائق لها' });
+    }
+
+    // Start transaction to ensure atomicity
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      console.log('[Bid.acceptBid] Transaction started');
+
+      // A. Update target bid to accepted
+      const [updateBidResult] = await connection.execute(
+        'UPDATE bids SET bid_status = ? WHERE id = ?',
+        ['accepted', bidId]
+      );
+      console.log('[Bid.acceptBid] Updated target bid, affected rows:', updateBidResult.affectedRows);
+      if (!updateBidResult.affectedRows) {
+        throw new Error(`Failed to update bid status for bidId=${bidId}`);
+      }
+
+      // B. Update all other bids to rejected
+      const [rejectBidsResult] = await connection.execute(
+        'UPDATE bids SET bid_status = ? WHERE shipment_id = ? AND id != ?',
+        ['rejected', shipmentId, bidId]
+      );
+      console.log('[Bid.acceptBid] Rejected other bids, affected rows:', rejectBidsResult.affectedRows);
+
+      // C. Update shipment to assigned with driver_id
+      const [updateShipmentResult] = await connection.execute(
+        'UPDATE shipments SET status = ?, driver_id = ? WHERE id = ?',
+        ['assigned', driverId, shipmentId]
+      );
+      console.log('[Bid.acceptBid] Updated shipment, affected rows:', updateShipmentResult.affectedRows);
+
+      await connection.commit();
+      console.log('[Bid.acceptBid] Transaction committed successfully');
+
+      // Notify driver of acceptance
+      try {
+        await Notification.create({
+          userId: driverId,
+          notificationType: 'bid_accepted',
+          title: 'تم قبول عرضك',
+          message: `تم قبول عرضك للشحنة رقم ${shipmentId}`,
+          relatedShipmentId: shipmentId,
+          relatedBidId: bidId,
+        });
+        console.log('[Bid.acceptBid] Driver acceptance notification sent');
+      } catch (notifError) {
+        console.warn('[Bid.acceptBid] Notification error:', notifError.message);
+      }
+
+      // Get other drivers for rejection notifications
+      const [otherBids] = await pool.execute(
+        'SELECT DISTINCT driver_id FROM bids WHERE shipment_id = ? AND id != ? AND bid_status = ?',
+        [shipmentId, bidId, 'rejected']
+      );
+
+      // Notify rejected drivers
+      for (const otherBid of otherBids) {
+        try {
+          await Notification.create({
+            userId: otherBid.driver_id,
+            notificationType: 'bid_rejected',
+            title: 'تم رفض عرضك',
+            message: `تم اختيار عرض آخر للشحنة رقم ${shipmentId}`,
+            relatedShipmentId: shipmentId,
+          });
+        } catch (notifError) {
+          console.warn('[Bid.acceptBid] Rejection notification error:', notifError.message);
+        }
+      }
+
+      console.log('[Bid.acceptBid] Rejection notifications sent to', otherBids.length, 'drivers');
+
+      return res.status(200).json({
+        success: true,
+        message: 'تم قبول العرض بنجاح',
+        bidId,
+        shipmentId,
+        driverId,
+        status: 'accepted',
+      });
+    } finally {
+      await connection.release();
+      console.log('[Bid.acceptBid] Database connection released');
+    }
+  } catch (error) {
+    console.error('[Bid.acceptBid] Error:', error.message, 'Code:', error.code, 'SQLState:', error.sqlState, 'Stack:', error.stack);
+    return res.status(500).json({ 
+      success: false,
+      message: error.message || 'خطأ في قبول العرض' 
+    });
+  }
+};
+
+module.exports = { createBid, getBidsByShipment, acceptBid };

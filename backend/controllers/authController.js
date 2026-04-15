@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 const User = require('../models/User');
 const Wallet = require('../models/Wallet');
+const { encryptText, decryptText } = require('../utils/encryption');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'secret_key';
 
@@ -43,12 +44,43 @@ const register = async (req, res) => {
     }
 
     const hashed = await bcrypt.hash(password, 10);
-    const user = await User.create({ fullName, email, phone, password: hashed, role, licenseNo, commercialNo, documentPath, issueDate, expiryDate });
+    const encryptedLicenseNo = licenseNo ? (() => {
+      try {
+        return encryptText(licenseNo);
+      } catch (error) {
+        console.error('[register] Encryption failed for licenseNo:', error.message);
+        return licenseNo; // Store plain text if encryption fails
+      }
+    })() : null;
+    const encryptedCommercialNo = commercialNo ? (() => {
+      try {
+        return encryptText(commercialNo);
+      } catch (error) {
+        console.error('[register] Encryption failed for commercialNo:', error.message);
+        return commercialNo; // Store plain text if encryption fails
+      }
+    })() : null;
+    const user = await User.create({ fullName, email, phone, password: hashed, role, licenseNo: encryptedLicenseNo, commercialNo: encryptedCommercialNo, documentPath, issueDate, expiryDate });
     await Wallet.createForUser(user.id);
 
     const token = jwt.sign({ id: user.id, role }, JWT_SECRET, { expiresIn: '30d' });
     console.log('[register] Success:', { userId: user.id, role });
-    res.status(201).json({ user, token });
+    res.status(201).json({
+      user: {
+        id: user.id,
+        full_name: fullName,
+        email,
+        phone,
+        role,
+        verification_status: 'pending',
+        license_no: licenseNo,
+        commercial_no: commercialNo,
+        document_path: documentPath,
+        issue_date: issueDate,
+        expiry_date: expiryDate,
+      },
+      token,
+    });
   } catch (error) {
     console.error('[register] Database error:', error.message, 'Code:', error.code, 'SQLState:', error.sqlState);
     res.status(500).json({ message: error.message || 'خطأ في الخادم أثناء التسجيل' });
@@ -98,7 +130,12 @@ const login = async (req, res) => {
 const getPendingUsers = async (req, res) => {
   try {
     const users = await User.getPendingVerifications();
-    res.json(users);
+    const decryptedUsers = users.map((user) => ({
+      ...user,
+      license_no: user.license_no ? decryptText(user.license_no) : null,
+      commercial_no: user.commercial_no ? decryptText(user.commercial_no) : null,
+    }));
+    res.json(decryptedUsers);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'خطأ في جلب المستخدمين المعلقين' });
@@ -133,9 +170,21 @@ const updateProfile = async (req, res) => {
       return res.status(400).json({ message: 'الاسم، البريد، ورقم الجوال مطلوبين' });
     }
 
+    const user = await User.findById(id);
+    if (!user) {
+      return res.status(404).json({ message: 'المستخدم غير موجود' });
+    }
+
+    const encryptedLicenseNo = typeof licenseNo === 'undefined'
+      ? user.license_no
+      : licenseNo ? encryptText(licenseNo) : null;
+    const encryptedCommercialNo = typeof commercialNo === 'undefined'
+      ? user.commercial_no
+      : commercialNo ? encryptText(commercialNo) : null;
+
     const [result] = await pool.execute(
       'UPDATE users SET full_name = ?, email = ?, phone = ?, license_no = ?, commercial_no = ? WHERE id = ?',
-      [fullName, email, phone, licenseNo, commercialNo, id]
+      [fullName, email, phone, encryptedLicenseNo, encryptedCommercialNo, id]
     );
 
     if (result.affectedRows === 0) {
@@ -156,18 +205,26 @@ const getProfile = async (req, res) => {
     if (!user) {
       return res.status(404).json({ message: 'المستخدم غير موجود' });
     }
+
+    const licenseNo = user.license_no && user.license_no.trim() !== ''
+      ? decryptText(user.license_no)
+      : null;
+    const commercialNo = user.commercial_no && user.commercial_no.trim() !== ''
+      ? decryptText(user.commercial_no)
+      : null;
+
     res.json({
       id: user.id,
       full_name: user.full_name,
       phone: user.phone,
       role: user.role,
-      license_no: user.license_no,
-      commercial_no: user.commercial_no,
+      license_no: licenseNo,
+      commercial_no: commercialNo,
       document_path: user.document_path,
-      verification_status: user.verification_status
+      verification_status: user.verification_status,
     });
   } catch (error) {
-    console.error(error);
+    console.error('[getProfile] Error:', error.message, 'Stack:', error.stack);
     res.status(500).json({ message: 'خطأ في جلب البيانات' });
   }
 };

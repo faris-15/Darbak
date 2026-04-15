@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'api_service.dart';
+import 'models/bid_model.dart';
 
 /// شاشة سوق الشحنات للسائق
 class DriverShipmentsMarketScreen extends StatefulWidget {
@@ -154,7 +155,7 @@ class _ShipperBidsListScreenState extends State<ShipperBidsListScreen> {
   final _shipmentIdController = TextEditingController(text: '1');
   bool _loading = false;
   String? _error;
-  List<Map<String, dynamic>> _bids = [];
+  List<BidModel> _bids = [];
 
   Future<void> _loadBids() async {
     setState(() {
@@ -173,8 +174,7 @@ class _ShipperBidsListScreenState extends State<ShipperBidsListScreen> {
     }
 
     try {
-      final bids = await ApiService.getBids(shipmentId);
-      _bids = bids.map((b) => b as Map<String, dynamic>).toList();
+      _bids = await ApiService.getBids(shipmentId);
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -218,8 +218,8 @@ class _ShipperBidsListScreenState extends State<ShipperBidsListScreen> {
                     return Card(
                       color: isBest ? Colors.green.shade50 : null,
                       child: ListTile(
-                        title: Text('عرض ${bid['bid_amount']} ريال'),
-                        subtitle: Text('السائق: ${bid['driver_id']} - ETA: ${bid['estimated_days']} يوم\nالحالة: ${bid['bid_status']}'),
+                        title: Text('عرض ${bid.bidAmount.toStringAsFixed(2)} ريال'),
+                        subtitle: Text('السائق: ${bid.driverId} - ETA: ${bid.estimatedDays} يوم\nالحالة: ${bid.bidStatus}'),
                         trailing: isBest ? const Text('الأفضل', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)) : null,
                       ),
                     );

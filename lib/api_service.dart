@@ -1,8 +1,15 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
+import 'models/bid_model.dart';
 
 class ApiService {
-  static const String baseUrl = 'http://127.0.0.1:5000/api';
+  static String get baseUrl {
+    if (kIsWeb) {
+      return 'http://127.0.0.1:5000/api';
+    }
+    return 'http://10.0.2.2:5000/api';
+  }
 
   static Future<Map<String, dynamic>> login(
     String identifier,
@@ -83,13 +90,16 @@ class ApiService {
     }
   }
 
-  static Future<List<dynamic>> getBids(int shipmentId) async {
+  static Future<List<BidModel>> getBids(int shipmentId) async {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/bids/shipment/$shipmentId'),
       );
       if (response.statusCode == 200) {
-        return jsonDecode(response.body);
+        final rawData = jsonDecode(response.body) as List<dynamic>;
+        return rawData
+            .map((item) => BidModel.fromJson(item as Map<String, dynamic>))
+            .toList();
       } else {
         throw Exception('Failed to load bids');
       }
@@ -144,7 +154,9 @@ class ApiService {
 
   static Future<Map<String, dynamic>> getProfile(int userId) async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/auth/profile/$userId'));
+      final response = await http.get(
+        Uri.parse('$baseUrl/auth/profile/$userId'),
+      );
       if (response.statusCode == 200) {
         return jsonDecode(response.body);
       } else {
@@ -164,7 +176,9 @@ class ApiService {
     int estimatedDays,
   ) async {
     try {
-      print('[ApiService.enterBiddingRoom] Input: shipmentId=$shipmentId, driverId=$driverId, bidAmount=$bidAmount, estimatedDays=$estimatedDays');
+      print(
+        '[ApiService.enterBiddingRoom] Input: shipmentId=$shipmentId, driverId=$driverId, bidAmount=$bidAmount, estimatedDays=$estimatedDays',
+      );
       final response = await http.post(
         Uri.parse('$baseUrl/bidding-rooms/rooms/$shipmentId/enter'),
         headers: {'Content-Type': 'application/json'},
@@ -193,7 +207,9 @@ class ApiService {
     int driverId,
   ) async {
     try {
-      print('[ApiService.exitBiddingRoom] Input: shipmentId=$shipmentId, driverId=$driverId');
+      print(
+        '[ApiService.exitBiddingRoom] Input: shipmentId=$shipmentId, driverId=$driverId',
+      );
       final response = await http.post(
         Uri.parse('$baseUrl/bidding-rooms/rooms/$shipmentId/exit'),
         headers: {'Content-Type': 'application/json'},
@@ -215,13 +231,17 @@ class ApiService {
 
   static Future<Map<String, dynamic>> getRoomStatus(int shipmentId) async {
     try {
-      print('[ApiService.getRoomStatus] Fetching status for shipmentId=$shipmentId');
+      print(
+        '[ApiService.getRoomStatus] Fetching status for shipmentId=$shipmentId',
+      );
       final response = await http.get(
         Uri.parse('$baseUrl/bidding-rooms/rooms/$shipmentId/status'),
       );
       if (response.statusCode == 200) {
         final result = jsonDecode(response.body);
-        print('[ApiService.getRoomStatus] Success: ${result['total_bids']} bids');
+        print(
+          '[ApiService.getRoomStatus] Success: ${result['total_bids']} bids',
+        );
         return result;
       } else {
         throw Exception('Failed to get room status');
@@ -379,7 +399,9 @@ class ApiService {
     }
   }
 
-  static Future<Map<String, dynamic>> getShipmentStatusHistory(int shipmentId) async {
+  static Future<Map<String, dynamic>> getShipmentStatusHistory(
+    int shipmentId,
+  ) async {
     final response = await http.get(
       Uri.parse('$baseUrl/shipment-status/$shipmentId/history'),
     );
@@ -387,6 +409,41 @@ class ApiService {
       return jsonDecode(response.body);
     } else {
       throw Exception('Failed to load shipment status history');
+    }
+  }
+
+  // Shipper Bid Management APIs
+  static Future<Map<String, dynamic>> acceptBid(int bidId) async {
+    try {
+      print('[ApiService.acceptBid] Accepting bid: $bidId');
+      print('[ApiService.acceptBid] URL: $baseUrl/bids/$bidId/accept');
+      final response = await http.post(
+        Uri.parse('$baseUrl/bids/$bidId/accept'),
+        headers: {'Content-Type': 'application/json'},
+      );
+      print('[ApiService.acceptBid] Status Code: ${response.statusCode}');
+      print('[ApiService.acceptBid] Response Body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        print('[ApiService.acceptBid] Success: $result');
+        return result;
+      } else {
+        try {
+          final error = jsonDecode(response.body);
+          throw Exception(
+            error['message'] ??
+                'Failed to accept bid (Status: ${response.statusCode})',
+          );
+        } catch (parseError) {
+          throw Exception(
+            'Server error (Status: ${response.statusCode}): ${response.body}',
+          );
+        }
+      }
+    } catch (e) {
+      print('[ApiService.acceptBid] Error: $e');
+      throw Exception(e.toString());
     }
   }
 }

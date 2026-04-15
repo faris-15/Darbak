@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'api_service.dart';
+import 'models/bid_model.dart';
 
 class AppColors {
   static const primary = Color(0xff168A57);
@@ -39,7 +40,7 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
   bool agree = false;
   bool isSubmitting = false;
   String validationError = '';
-  List<dynamic> existingBids = [];
+  List<BidModel> existingBids = [];
   double? lowestBid;
 
   @override
@@ -58,7 +59,7 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
         existingBids = bids;
         if (bids.isNotEmpty) {
           // Assuming bids are sorted by bid_amount ASC, first one is lowest
-          lowestBid = double.tryParse(bids[0]['bid_amount'].toString()) ?? 0;
+          lowestBid = bids[0].bidAmount;
         }
       });
     } catch (e) {

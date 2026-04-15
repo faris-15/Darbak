@@ -38,6 +38,7 @@ router.post('/admin/users/:id/verify', [body('status').isIn(['verified', 'reject
 
 router.put('/profile/:id', [
   body('fullName').notEmpty(),
+  body('email').isEmail(),
   body('phone').notEmpty(),
 ], (req, res) => {
   const errors = validationResult(req);

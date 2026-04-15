@@ -5,6 +5,7 @@ import 'app_theme.dart';
 import 'api_service.dart';
 import 'location_picker_screens.dart';
 import 'shipment_screens.dart';
+import 'shipment_bids_detail_screen.dart';
 import 'trip_screens.dart';
 
 /// Home للشاحن (الشركة/الجهة المالكة للشحنات)
@@ -286,6 +287,30 @@ class _ShipperShipmentsScreenState extends State<ShipperShipmentsScreen> {
                               Text('الوزن: ${shipment['weight_kg']} طن'),
                               Text('السعر الأساسي: ${shipment['base_price']} ريال'),
                               Text('الموعد النهائي: ${shipment['expected_delivery_date']}'),
+                              const SizedBox(height: 12),
+                              // View Bids button - only show for bidding status
+                              if (shipment['status'] == 'bidding')
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: ElevatedButton.icon(
+                                    onPressed: () {
+                                      Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) => ShipmentBidsDetailScreen(
+                                            shipmentId: shipment['id'],
+                                            shipmentTitle: 'شحنة #${shipment['id']}',
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(Icons.gavel_rounded),
+                                    label: const Text('عرض العروض'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: DarbakColors.primaryGreen,
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
                         ),

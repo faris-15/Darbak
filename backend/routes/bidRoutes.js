@@ -1,6 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { createBid, getBidsByShipment } = require('../controllers/bidController');
+const { createBid, getBidsByShipment, acceptBid } = require('../controllers/bidController');
 
 const router = express.Router();
 
@@ -20,5 +20,7 @@ router.post(
 );
 
 router.get('/shipment/:shipmentId', getBidsByShipment);
+
+router.post('/:bidId/accept', acceptBid);
 
 module.exports = router;
