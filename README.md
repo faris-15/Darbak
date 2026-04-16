@@ -1,6 +1,6 @@
 ```mermaid
 gantt
-    title المخطط الزمني لمشروع دروبك (Darbak)
+    title  (Darbak)
     dateFormat  YYYY-MM-DD
     axisFormat  %m-%d
 
