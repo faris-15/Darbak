@@ -1,16 +1,13 @@
-# darbak
+gantt
+    title المخطط الزمني للمشروع
+    dateFormat  YYYY-MM-DD
+    axisFormat  %m-%d
 
-A new Flutter project.
+    section Phase 1: Development
+    Start completing features (Front/Backend) :active, task1, 2026-04-12, 7d
+    Continue dev &amp; begin bug fixing           :active, task2, 2026-04-19, 7d
+    Finalize features &amp; resolve bugs          :        task3, 2026-04-26, 7d
 
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+    section Phase 2: Evaluation
+    Conduct program eval (Performance/Unit)   :        task4, 2026-05-03, 7d
+    Resolve issues &amp; ensure app stability     :        task5, 2026-05-10, 7d
