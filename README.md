@@ -1,6 +1,6 @@
 ```mermaid
 gantt
-    title  Darbak (Agile Methodology)
+    title  Darbak 
     dateFormat  YYYY-MM-DD
     axisFormat  %m-%d
 
