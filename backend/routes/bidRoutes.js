@@ -1,14 +1,15 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { createBid, getBidsByShipment, acceptBid } = require('../controllers/bidController');
+const { requireAuth } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
 router.post(
   '/',
+  requireAuth,
   [
     body('shipmentId').isInt(),
-    body('driverId').isInt(),
     body('bidAmount').isNumeric(),
     body('estimatedDays').isInt(),
   ],
@@ -21,6 +22,6 @@ router.post(
 
 router.get('/shipment/:shipmentId', getBidsByShipment);
 
-router.post('/:bidId/accept', acceptBid);
+router.post('/:bidId/accept', requireAuth, acceptBid);
 
 module.exports = router;

@@ -26,6 +26,22 @@ const User = {
     return rows[0];
   },
 
+  existsByPhone: async (phone) => {
+    const [rows] = await pool.execute(
+      'SELECT id FROM users WHERE phone = ? LIMIT 1',
+      [phone]
+    );
+    return rows.length > 0;
+  },
+
+  existsByEmail: async (email) => {
+    const [rows] = await pool.execute(
+      'SELECT id FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1',
+      [email]
+    );
+    return rows.length > 0;
+  },
+
   findById: async (id) => {
     const [rows] = await pool.execute('SELECT * FROM users WHERE id = ?', [id]);
     return rows[0];

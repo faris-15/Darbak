@@ -1,10 +1,43 @@
 const pool = require('../config/db');
 
 const Shipment = {
-  create: async ({ shipperId, weightKg, cargoDescription, pickupAddress, dropoffAddress, basePrice, expectedDeliveryDate, period }) => {
+  create: async ({
+    shipperId,
+    weightKg,
+    cargoDescription,
+    pickupAddress,
+    dropoffAddress,
+    pickupLat,
+    pickupLng,
+    dropoffLat,
+    dropoffLng,
+    basePrice,
+    expectedDeliveryDate,
+    period,
+    specialInstructions,
+    auctionDurationHours,
+    auctionEndTime,
+  }) => {
     const [result] = await pool.execute(
-      'INSERT INTO shipments (shipper_id, weight_kg, cargo_description, pickup_address, dropoff_address, base_price, expected_delivery_date, period, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [shipperId, weightKg, cargoDescription, pickupAddress, dropoffAddress, basePrice, expectedDeliveryDate, period, 'bidding']
+      'INSERT INTO shipments (shipper_id, weight_kg, cargo_description, pickup_address, dropoff_address, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, base_price, expected_delivery_date, period, special_instructions, auction_duration_hours, auction_end_time, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        shipperId,
+        weightKg,
+        cargoDescription,
+        pickupAddress,
+        dropoffAddress,
+        pickupLat,
+        pickupLng,
+        dropoffLat,
+        dropoffLng,
+        basePrice,
+        expectedDeliveryDate,
+        period,
+        specialInstructions,
+        auctionDurationHours,
+        auctionEndTime,
+        'bidding',
+      ]
     );
     return {
       id: result.insertId,
@@ -13,9 +46,16 @@ const Shipment = {
       cargo_description: cargoDescription,
       pickup_address: pickupAddress,
       dropoff_address: dropoffAddress,
+      pickup_lat: pickupLat,
+      pickup_lng: pickupLng,
+      dropoff_lat: dropoffLat,
+      dropoff_lng: dropoffLng,
       base_price: basePrice,
       expected_delivery_date: expectedDeliveryDate,
       period: period,
+      special_instructions: specialInstructions,
+      auction_duration_hours: auctionDurationHours,
+      auction_end_time: auctionEndTime,
       status: 'bidding',
     };
   },
@@ -25,8 +65,27 @@ const Shipment = {
     return rows[0];
   },
 
+  /** Count shipments for a shipper in given lifecycle statuses (e.g. active, open, bidding). */
+  countByShipperInStatuses: async (shipperId, statuses) => {
+    if (!statuses.length) return 0;
+    const placeholders = statuses.map(() => '?').join(', ');
+    const [rows] = await pool.execute(
+      `SELECT COUNT(*) AS cnt FROM shipments WHERE shipper_id = ? AND status IN (${placeholders})`,
+      [shipperId, ...statuses],
+    );
+    return Number(rows[0]?.cnt ?? 0);
+  },
+
   list: async () => {
     const [rows] = await pool.execute('SELECT * FROM shipments ORDER BY created_at DESC');
+    return rows;
+  },
+
+  listForShipper: async (shipperId) => {
+    const [rows] = await pool.execute(
+      'SELECT * FROM shipments WHERE shipper_id = ? ORDER BY created_at DESC',
+      [shipperId]
+    );
     return rows;
   },
 
@@ -66,6 +125,52 @@ const Shipment = {
     const [result] = await pool.execute(
       'UPDATE shipments SET status = ? WHERE id = ?',
       [status, shipmentId]
+    );
+    return result.affectedRows > 0;
+  },
+
+  listActiveByDriver: async (driverId) => {
+    const [rows] = await pool.execute(
+      `SELECT *
+       FROM shipments
+       WHERE driver_id = ?
+         AND status IN ('assigned', 'at_pickup', 'en_route', 'at_dropoff')
+       ORDER BY created_at DESC`,
+      [driverId]
+    );
+    return rows;
+  },
+
+  listByDriverPriority: async (driverId) => {
+    const [rows] = await pool.execute(
+      `SELECT *,
+        CASE
+          WHEN status IN ('assigned', 'at_pickup', 'en_route', 'at_dropoff') THEN 1
+          WHEN status IN ('delivered', 'cancelled') THEN 2
+          ELSE 3
+        END AS status_priority
+       FROM shipments
+       WHERE driver_id = ?
+       ORDER BY
+         status_priority ASC,
+         CASE
+           WHEN status IN ('assigned', 'at_pickup', 'en_route', 'at_dropoff') THEN created_at
+           ELSE NULL
+         END DESC,
+         CASE
+           WHEN status IN ('delivered', 'cancelled') THEN COALESCE(actual_delivery_date, created_at)
+           ELSE NULL
+         END DESC,
+         created_at DESC`,
+      [driverId]
+    );
+    return rows;
+  },
+
+  setDeliveryMetadata: async (shipmentId, { actualDeliveryDate, podPhotoPath }) => {
+    const [result] = await pool.execute(
+      'UPDATE shipments SET actual_delivery_date = ? WHERE id = ?',
+      [actualDeliveryDate, shipmentId]
     );
     return result.affectedRows > 0;
   },

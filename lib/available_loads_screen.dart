@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async';
 import 'api_service.dart';
 import 'bidding_room_screen.dart';
 
@@ -32,12 +33,22 @@ class _AvailableLoadsScreenState extends State<AvailableLoadsScreen> {
   String userRating = '4.8';
   String totalEarnings = '25000';
   String completedTrips = '12';
+  Timer? _ticker;
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
     _loadAvailableShipments();
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadUserData() async {
@@ -210,6 +221,8 @@ class _AvailableLoadsScreenState extends State<AvailableLoadsScreen> {
                                       ),
                                       child: ShipmentCard(
                                         shipmentData: shipment,
+                                        isAuctionExpired: _isAuctionExpired(shipment),
+                                        countdownText: _countdownText(shipment),
                                         onBidTap: () {
                                           Navigator.push(
                                             context,
@@ -238,6 +251,27 @@ class _AvailableLoadsScreenState extends State<AvailableLoadsScreen> {
         ),
       ),
     );
+  }
+
+  bool _isAuctionExpired(Map<String, dynamic> shipment) {
+    final raw = shipment['auction_end_time']?.toString();
+    if (raw == null || raw.isEmpty) return false;
+    final end = DateTime.tryParse(raw);
+    if (end == null) return false;
+    return DateTime.now().isAfter(end);
+  }
+
+  String _countdownText(Map<String, dynamic> shipment) {
+    final raw = shipment['auction_end_time']?.toString();
+    if (raw == null || raw.isEmpty) return 'غير محدد';
+    final end = DateTime.tryParse(raw);
+    if (end == null) return 'غير محدد';
+    final diff = end.difference(DateTime.now());
+    if (diff.isNegative || diff.inSeconds <= 0) return 'انتهى المزاد';
+    final h = diff.inHours.toString().padLeft(2, '0');
+    final m = (diff.inMinutes % 60).toString().padLeft(2, '0');
+    final s = (diff.inSeconds % 60).toString().padLeft(2, '0');
+    return '$h:$m:$s';
   }
 }
 
@@ -523,11 +557,15 @@ class _CountChip extends StatelessWidget {
 
 class ShipmentCard extends StatelessWidget {
   final Map<String, dynamic> shipmentData;
+  final bool isAuctionExpired;
+  final String countdownText;
   final VoidCallback onBidTap;
 
   const ShipmentCard({
     super.key,
     required this.shipmentData,
+    required this.isAuctionExpired,
+    required this.countdownText,
     required this.onBidTap,
   });
 
@@ -560,9 +598,6 @@ class ShipmentCard extends StatelessWidget {
     final price = _formatPrice(shipmentData['base_price']);
     final rating = '4.8'; // Default rating, can be updated from shipper data
     
-    // Calculate time left (placeholder - would come from real data)
-    const timeLeft = '2:30 س';
-
     return Container(
       decoration: BoxDecoration(
         color: AppColors.card,
@@ -688,8 +723,8 @@ class ShipmentCard extends StatelessWidget {
                     const SizedBox(width: 14),
                     _MiniInfo(
                       icon: Icons.access_time_rounded,
-                      text: timeLeft,
-                      color: AppColors.danger,
+                      text: isAuctionExpired ? 'انتهى المزاد' : countdownText,
+                      color: isAuctionExpired ? AppColors.danger : AppColors.orange,
                     ),
                   ],
                 ),
@@ -728,7 +763,7 @@ class ShipmentCard extends StatelessWidget {
             child: SizedBox(
               height: 52,
               child: ElevatedButton(
-                onPressed: onBidTap,
+                onPressed: isAuctionExpired ? null : onBidTap,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   disabledBackgroundColor: const Color(0xffDCEFE6),

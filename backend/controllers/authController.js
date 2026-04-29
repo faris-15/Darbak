@@ -3,24 +3,28 @@ const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 const User = require('../models/User');
 const Wallet = require('../models/Wallet');
+const Truck = require('../models/Truck');
 const { encryptText, decryptText } = require('../utils/encryption');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'secret_key';
 
 const register = async (req, res) => {
+  let connection;
   try {
-    const { fullName, email, phone, password, role = 'driver', licenseNo = null, commercialNo = null, documentPath = null, issueDate = null, expiryDate = null } = req.body;
+    const { fullName, email, phone, password, role = 'driver', licenseNo = null, commercialNo = null, documentPath = null, issueDate = null, expiryDate = null, truckType = null, plateNumber = null, isthimaraNo = null } = req.body;
+    const normalizedEmail = (email ?? '').toString().trim().toLowerCase();
+    const normalizedPhone = (phone ?? '').toString().trim();
 
-    console.log('[register] Input:', { fullName, email, phone, role, issueDate, expiryDate });
+    console.log('[register] Input:', { fullName, email: normalizedEmail, phone: normalizedPhone, role, issueDate, expiryDate });
 
     // Validate required fields
     if (!fullName || fullName.trim() === '') {
       return res.status(400).json({ message: 'الاسم الكامل مطلوب' });
     }
-    if (!email || email.trim() === '') {
+    if (!normalizedEmail) {
       return res.status(400).json({ message: 'البريد الإلكتروني مطلوب' });
     }
-    if (!phone || phone.trim() === '') {
+    if (!normalizedPhone) {
       return res.status(400).json({ message: 'رقم الجوال مطلوب' });
     }
     if (!password || password.length < 6) {
@@ -34,13 +38,22 @@ const register = async (req, res) => {
     if (role === 'driver' && (!licenseNo || licenseNo.trim() === '')) {
       return res.status(400).json({ message: 'رقم الرخصة مطلوب للسائقين' });
     }
+    if (role === 'driver' && (!truckType || !plateNumber || !isthimaraNo)) {
+      return res.status(400).json({ message: 'بيانات الشاحنة الأساسية مطلوبة للسائقين' });
+    }
     if (role === 'shipper' && (!commercialNo || commercialNo.trim() === '')) {
       return res.status(400).json({ message: 'رقم السجل التجاري مطلوب للشاحنين' });
     }
 
-    const existing = await User.findByPhoneOrEmail(phone) || await User.findByPhoneOrEmail(email);
-    if (existing) {
-      return res.status(400).json({ message: 'البريد أو رقم الجوال مستخدم بالفعل' });
+    const [phoneUsed, emailUsed] = await Promise.all([
+      User.existsByPhone(normalizedPhone),
+      User.existsByEmail(normalizedEmail),
+    ]);
+    if (phoneUsed) {
+      return res.status(400).json({ message: 'رقم الجوال مستخدم بالفعل' });
+    }
+    if (emailUsed) {
+      return res.status(400).json({ message: 'البريد الإلكتروني مستخدم بالفعل' });
     }
 
     const hashed = await bcrypt.hash(password, 10);
@@ -49,7 +62,7 @@ const register = async (req, res) => {
         return encryptText(licenseNo);
       } catch (error) {
         console.error('[register] Encryption failed for licenseNo:', error.message);
-        return licenseNo; // Store plain text if encryption fails
+        throw error;
       }
     })() : null;
     const encryptedCommercialNo = commercialNo ? (() => {
@@ -57,20 +70,73 @@ const register = async (req, res) => {
         return encryptText(commercialNo);
       } catch (error) {
         console.error('[register] Encryption failed for commercialNo:', error.message);
-        return commercialNo; // Store plain text if encryption fails
+        throw error;
       }
     })() : null;
-    const user = await User.create({ fullName, email, phone, password: hashed, role, licenseNo: encryptedLicenseNo, commercialNo: encryptedCommercialNo, documentPath, issueDate, expiryDate });
-    await Wallet.createForUser(user.id);
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
 
-    const token = jwt.sign({ id: user.id, role }, JWT_SECRET, { expiresIn: '30d' });
-    console.log('[register] Success:', { userId: user.id, role });
+    const [userInsert] = await connection.execute(
+      'INSERT INTO users (full_name, email, phone, password, role, license_no, commercial_no, document_path, issue_date, expiry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        fullName,
+        normalizedEmail,
+        normalizedPhone,
+        hashed,
+        role,
+        encryptedLicenseNo,
+        encryptedCommercialNo,
+        documentPath,
+        issueDate,
+        expiryDate,
+      ]
+    );
+    const userId = userInsert.insertId;
+
+    await connection.execute(
+      'INSERT INTO wallets (user_id, current_balance) VALUES (?, ?)',
+      [userId, 0]
+    );
+    if (role === 'driver') {
+      const existingPlate = await Truck.findByPlateNumber(plateNumber.trim());
+      if (existingPlate) {
+        return res.status(400).json({ message: 'رقم اللوحة مستخدم مسبقاً' });
+      }
+      const now = new Date();
+      const defaultManufacturingYear = now.getFullYear();
+      const defaultInsuranceExpiryDate = new Date(
+        now.getFullYear() + 1,
+        now.getMonth(),
+        now.getDate()
+      )
+        .toISOString()
+        .split('T')[0];
+      await connection.execute(
+        'INSERT INTO trucks (user_id, plate_number, isthimara_no, truck_type, capacity_kg, manufacturing_year, insurance_expiry_date, verification_status, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          userId,
+          plateNumber.trim(),
+          encryptText(isthimaraNo.trim()),
+          truckType.trim(),
+          0,
+          defaultManufacturingYear,
+          defaultInsuranceExpiryDate,
+          'pending',
+          1,
+        ]
+      );
+    }
+
+    await connection.commit();
+
+    const token = jwt.sign({ id: userId, role }, JWT_SECRET, { expiresIn: '30d' });
+    console.log('[register] Success:', { userId, role });
     res.status(201).json({
       user: {
-        id: user.id,
+        id: userId,
         full_name: fullName,
-        email,
-        phone,
+        email: normalizedEmail,
+        phone: normalizedPhone,
         role,
         verification_status: 'pending',
         license_no: licenseNo,
@@ -82,8 +148,17 @@ const register = async (req, res) => {
       token,
     });
   } catch (error) {
+    if (connection) {
+      try {
+        await connection.rollback();
+      } catch (_) {}
+    }
     console.error('[register] Database error:', error.message, 'Code:', error.code, 'SQLState:', error.sqlState);
     res.status(500).json({ message: error.message || 'خطأ في الخادم أثناء التسجيل' });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
   }
 };
 

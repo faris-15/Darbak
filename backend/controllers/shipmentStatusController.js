@@ -34,7 +34,13 @@ const recordStatus = async (req, res) => {
     });
 
     // Update shipment status for the main shipment record as well
-    const allowedStates = ['pickup_arrived', 'en_route', 'dropoff_arrived', 'pod_required', 'delivered'];
+    const allowedStates = [
+      'assigned',
+      'at_pickup',
+      'en_route',
+      'at_dropoff',
+      'delivered',
+    ];
     if (allowedStates.includes(status)) {
       await Shipment.updateStatus(shipment_id, status);
     }

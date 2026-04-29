@@ -6,13 +6,17 @@ const pool = require('../config/db');
 
 const createBid = async (req, res) => {
   try {
-    const { shipmentId, driverId, bidAmount, estimatedDays } = req.body;
+    const { shipmentId, bidAmount, estimatedDays } = req.body;
+    const driverId = req.user?.id;
 
     console.log('[Bid.createBid] Input:', { shipmentId, driverId, bidAmount, estimatedDays });
 
     // Validate required fields
     if (!shipmentId || !driverId || !bidAmount || !estimatedDays) {
       return res.status(400).json({ message: 'جميع الحقول مطلوبة' });
+    }
+    if (req.user?.role !== 'driver') {
+      return res.status(403).json({ message: 'فقط السائق يمكنه تقديم عرض' });
     }
 
     // Check shipment exists and is in bidding status
@@ -23,6 +27,9 @@ const createBid = async (req, res) => {
 
     if (shipment.status !== 'bidding' && shipment.status !== 'pending') {
       return res.status(400).json({ message: 'الشحنة غير متاحة للتقديم عليها' });
+    }
+    if (shipment.auction_end_time && new Date(shipment.auction_end_time) <= new Date()) {
+      return res.status(400).json({ message: 'انتهى وقت المزاد لهذه الشحنة' });
     }
 
     // Validate bid amount doesn't exceed base price
@@ -162,6 +169,9 @@ const acceptBid = async (req, res) => {
 
     const shipmentId = bid.shipment_id;
     const driverId = bid.driver_id;
+    if (req.user?.role !== 'shipper') {
+      return res.status(403).json({ message: 'فقط الشاحن يمكنه قبول العرض' });
+    }
 
     if (!shipmentId || !driverId) {
       console.error('[Bid.acceptBid] Missing required IDs:', { shipmentId, driverId });
@@ -180,6 +190,9 @@ const acceptBid = async (req, res) => {
     if (shipment.status !== 'bidding') {
       console.warn('[Bid.acceptBid] Shipment not in bidding status:', shipment.status);
       return res.status(400).json({ message: 'الشحنة لا يمكن تعيين سائق لها' });
+    }
+    if (Number(shipment.shipper_id) !== Number(req.user.id)) {
+      return res.status(403).json({ message: 'لا يمكنك قبول عروض هذه الشحنة' });
     }
 
     // Start transaction to ensure atomicity

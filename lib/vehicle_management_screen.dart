@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'app_theme.dart';
 import 'app_widgets.dart';
 import 'api_service.dart';
@@ -14,105 +13,99 @@ class VehicleManagementScreen extends StatefulWidget {
 }
 
 class _VehicleManagementScreenState extends State<VehicleManagementScreen> {
-  Map<String, dynamic>? _truck;
+  static const int _maxTrucks = 5;
+  List<Map<String, dynamic>> _trucks = [];
   bool _isLoading = true;
-  bool _isEditing = false;
   bool _isSaving = false;
 
   final _formKey = GlobalKey<FormState>();
+  int? _editingTruckId;
   late TextEditingController _plateNoController;
+  late TextEditingController _isthimaraNoController;
   late TextEditingController _truckTypeController;
-  late TextEditingController _capacityController;
-  late TextEditingController _yearController;
-  late TextEditingController _insuranceController;
+  static const List<String> _saudiTruckTypes = [
+    'دباب نقل',
+    'وانيت',
+    'دينا',
+    'لوري',
+    'سطحة',
+    'تريلا جوانب',
+    'تريلا ستارة',
+    'برادة',
+    'صهريج',
+    'قلاب',
+  ];
+  String? _selectedTruckType;
 
   @override
   void initState() {
     super.initState();
+    _plateNoController = TextEditingController();
+    _isthimaraNoController = TextEditingController();
+    _truckTypeController = TextEditingController();
     _loadTruck();
   }
 
   Future<void> _loadTruck() async {
-    final prefs = await SharedPreferences.getInstance();
-    final driverId = prefs.getInt('user_id');
-
-    if (driverId == null) {
-      setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('لم يتم العثور على بيانات المستخدم')),
-      );
-      return;
-    }
-
     try {
-      final truck = await ApiService.getTruckByDriver(driverId);
+      final trucksRaw = await ApiService.getMyTrucks();
       setState(() {
-        _truck = truck;
-        _plateNoController = TextEditingController(text: truck['plate_number']);
-        _truckTypeController = TextEditingController(text: truck['truck_type']);
-        _capacityController = TextEditingController(
-          text: truck['capacity_kg'].toString(),
-        );
-        _yearController = TextEditingController(
-          text: truck['manufacturing_year']?.toString() ?? '',
-        );
-        _insuranceController = TextEditingController(
-          text: truck['insurance_expiry_date'] ?? '',
-        );
+        _trucks = trucksRaw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
         _isLoading = false;
       });
     } catch (e) {
-      // Truck not found, user needs to register one
       setState(() {
-        _truck = null;
+        _trucks = [];
         _isLoading = false;
-        _plateNoController = TextEditingController();
-        _truckTypeController = TextEditingController();
-        _capacityController = TextEditingController();
-        _yearController = TextEditingController();
-        _insuranceController = TextEditingController();
       });
     }
+  }
+
+  void _resetForm() {
+    _editingTruckId = null;
+    _plateNoController.text = '';
+    _isthimaraNoController.text = '';
+    _truckTypeController.text = '';
+    _selectedTruckType = null;
+  }
+
+  void _startEditing(Map<String, dynamic> truck) {
+    setState(() {
+      _editingTruckId = truck['id'] as int;
+      _plateNoController.text = (truck['plate_number'] ?? '').toString();
+      _isthimaraNoController.text = (truck['isthimara_no'] ?? '').toString();
+      _truckTypeController.text = (truck['truck_type'] ?? '').toString();
+      _selectedTruckType = _truckTypeController.text.isEmpty
+          ? null
+          : _truckTypeController.text;
+    });
   }
 
   Future<void> _saveTruck() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final prefs = await SharedPreferences.getInstance();
-    final driverId = prefs.getInt('user_id');
-
-    if (driverId == null) return;
-
     setState(() => _isSaving = true);
     try {
-      if (_truck == null) {
-        // Register new truck
+      if (_editingTruckId == null) {
         await ApiService.registerTruck({
-          'user_id': driverId,
           'plate_number': _plateNoController.text.trim(),
-          'truck_type': _truckTypeController.text.trim(),
-          'capacity_kg': double.parse(_capacityController.text),
-          'manufacturing_year': _yearController.text.isNotEmpty
-              ? int.parse(_yearController.text)
-              : null,
-          'insurance_expiry_date': _insuranceController.text.trim(),
+          'isthimara_no': _isthimaraNoController.text.trim(),
+          'truck_type': _selectedTruckType ?? _truckTypeController.text.trim(),
         });
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('تم تسجيل الشاحنة بنجاح')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تمت إضافة الشاحنة بنجاح')),
+        );
       } else {
-        // Update existing truck
-        await ApiService.updateTruck(_truck!['id'], {
+        await ApiService.updateTruck(_editingTruckId!, {
           'plate_number': _plateNoController.text.trim(),
-          'truck_type': _truckTypeController.text.trim(),
-          'capacity_kg': double.parse(_capacityController.text),
-          'insurance_expiry_date': _insuranceController.text.trim(),
+          'isthimara_no': _isthimaraNoController.text.trim(),
+          'truck_type': _selectedTruckType ?? _truckTypeController.text.trim(),
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('تم تحديث بيانات الشاحنة بنجاح')),
         );
       }
-      setState(() => _isEditing = false);
+      _resetForm();
       await _loadTruck();
     } catch (e) {
       ScaffoldMessenger.of(
@@ -126,10 +119,8 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen> {
   @override
   void dispose() {
     _plateNoController.dispose();
+    _isthimaraNoController.dispose();
     _truckTypeController.dispose();
-    _capacityController.dispose();
-    _yearController.dispose();
-    _insuranceController.dispose();
     super.dispose();
   }
 
@@ -144,15 +135,21 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('إدارة الشاحنة'),
-        actions: [
-          if (!_isEditing && _truck != null)
-            IconButton(
-              icon: const Icon(Icons.edit),
-              onPressed: () => setState(() => _isEditing = true),
-            ),
-        ],
+        title: const Text('شاحناتي'),
       ),
+      floatingActionButton: _editingTruckId == null && _trucks.length < _maxTrucks
+          ? FloatingActionButton.extended(
+              backgroundColor: DarbakColors.primaryGreen,
+              onPressed: () {
+                setState(() {
+                  _editingTruckId = null;
+                });
+                _resetForm();
+              },
+              icon: const Icon(Icons.add, color: Colors.white),
+              label: const Text('إضافة شاحنة', style: TextStyle(color: Colors.white)),
+            )
+          : null,
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Directionality(
@@ -160,178 +157,68 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (_truck == null)
-                // Registration Mode
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Card(
-                      elevation: 0,
-                      color: const Color(0xFFFFF3E0),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        side: const BorderSide(color: Colors.orange),
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: DarbakColors.cardBackground,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  'شاحناتي: ${_trucks.length}/$_maxTrucks',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              if (_trucks.isNotEmpty)
+                ..._trucks.map(
+                  (truck) => Card(
+                    elevation: 0,
+                    color: DarbakColors.cardBackground,
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: ListTile(
+                      title: Text('${truck['truck_type']} - ${truck['plate_number']}'),
+                      subtitle: Text('الاستمارة: ${truck['isthimara_no'] ?? '-'}'),
+                      trailing: IconButton(
+                        onPressed: () => _startEditing(truck),
+                        icon: const Icon(Icons.edit, color: DarbakColors.primaryGreen),
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Row(
-                          children: [
-                            const Icon(Icons.info, color: Colors.orange),
-                            const SizedBox(width: 8),
-                            const Expanded(
-                              child: Text(
-                                'يجب تسجيل بيانات شاحنتك قبل البدء في العمل',
-                                style: TextStyle(
-                                  color: Colors.orange,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
+                    ),
+                  ),
+                ),
+              if (_editingTruckId == null && _trucks.length >= _maxTrucks)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text(
+                    'وصلت للحد الأعلى (5 شاحنات)',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ),
+              if (_editingTruckId != null || _trucks.length < _maxTrucks) ...[
+                const SizedBox(height: 12),
+                _buildForm(),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    if (_editingTruckId != null)
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: _resetForm,
+                          child: const Text('إلغاء'),
                         ),
                       ),
+                    if (_editingTruckId != null) const SizedBox(width: 10),
+                    Expanded(
+                      child: _isSaving
+                          ? const Center(child: CircularProgressIndicator())
+                          : DarbakPrimaryButton(
+                              label: _editingTruckId == null ? 'إضافة شاحنة' : 'حفظ التعديلات',
+                              icon: Icons.check_circle_outline,
+                              onPressed: _saveTruck,
+                            ),
                     ),
-                    const SizedBox(height: 20),
-                    const Text(
-                      'بيانات الشاحنة',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: DarbakColors.dark,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    _buildForm(),
-                    const SizedBox(height: 20),
-                    _isSaving
-                        ? const Center(child: CircularProgressIndicator())
-                        : DarbakPrimaryButton(
-                            label: 'تسجيل الشاحنة',
-                            icon: Icons.check_circle_outline,
-                            onPressed: _saveTruck,
-                          ),
-                  ],
-                )
-              else
-                // View Mode
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    if (_isEditing)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildForm(),
-                          const SizedBox(height: 20),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: () =>
-                                      setState(() => _isEditing = false),
-                                  child: const Text('الغاء'),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _isSaving
-                                    ? const Center(
-                                        child: CircularProgressIndicator(),
-                                      )
-                                    : DarbakPrimaryButton(
-                                        label: 'حفظ',
-                                        onPressed: _saveTruck,
-                                      ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      )
-                    else
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          // Verification Status Badge
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color:
-                                  _truck!['verification_status'] == 'verified'
-                                  ? Colors.green[100]
-                                  : Colors.orange[100],
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color:
-                                    _truck!['verification_status'] == 'verified'
-                                    ? Colors.green
-                                    : Colors.orange,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  _truck!['verification_status'] == 'verified'
-                                      ? Icons.check_circle
-                                      : Icons.schedule,
-                                  color:
-                                      _truck!['verification_status'] ==
-                                          'verified'
-                                      ? Colors.green
-                                      : Colors.orange,
-                                  size: 18,
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  _truck!['verification_status'] == 'verified'
-                                      ? 'تم التحقق من الشاحنة'
-                                      : 'في انتظار التحقق',
-                                  style: TextStyle(
-                                    color:
-                                        _truck!['verification_status'] ==
-                                            'verified'
-                                        ? Colors.green
-                                        : Colors.orange,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          _buildInfoCard(
-                            icon: Icons.confirmation_number,
-                            label: 'لوحة الترخيص',
-                            value: _truck!['plate_no'],
-                          ),
-                          _buildInfoCard(
-                            icon: Icons.directions_car,
-                            label: 'نوع الشاحنة',
-                            value: _truck!['truck_type'],
-                          ),
-                          _buildInfoCard(
-                            icon: Icons.scale,
-                            label: 'السعة',
-                            value: '${_truck!['capacity_tons']} طن',
-                          ),
-                          if (_truck!['year_manufactured'] != null)
-                            _buildInfoCard(
-                              icon: Icons.calendar_today,
-                              label: 'سنة الصنع',
-                              value: _truck!['year_manufactured'].toString(),
-                            ),
-                          if (_truck!['insurance_expiry_date'] != null)
-                            _buildInfoCard(
-                              icon: Icons.security,
-                              label: 'انتهاء التأمين',
-                              value: _truck!['insurance_expiry_date'],
-                            ),
-                        ],
-                      ),
                   ],
                 ),
+              ],
             ],
           ),
         ),
@@ -356,83 +243,40 @@ class _VehicleManagementScreenState extends State<VehicleManagementScreen> {
           ),
           const SizedBox(height: 12),
           TextFormField(
-            controller: _truckTypeController,
+            controller: _isthimaraNoController,
+            decoration: const InputDecoration(
+              labelText: 'رقم الاستمارة',
+            ),
+            validator: (value) =>
+                (value == null || value.isEmpty) ? 'رقم الاستمارة مطلوب' : null,
+            textAlign: TextAlign.right,
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: _selectedTruckType,
+            items: _saudiTruckTypes
+                .map(
+                  (type) => DropdownMenuItem<String>(
+                    value: type,
+                    child: Text(type),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              setState(() {
+                _selectedTruckType = value;
+                _truckTypeController.text = value ?? '';
+              });
+            },
             decoration: const InputDecoration(
               labelText: 'نوع الشاحنة',
-              hintText: 'مثال: قلاب، نقل عام، تبريد',
             ),
             validator: (value) =>
                 (value == null || value.isEmpty) ? 'نوع الشاحنة مطلوب' : null,
-            textAlign: TextAlign.right,
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _capacityController,
-            decoration: const InputDecoration(
-              labelText: 'السعة (بالطن)',
-              hintText: '10.5',
-            ),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            validator: (value) {
-              if (value == null || value.isEmpty) return 'السعة مطلوبة';
-              if (double.tryParse(value) == null) return 'أدخل قيمة صحيحة';
-              return null;
-            },
-            textAlign: TextAlign.right,
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _yearController,
-            decoration: const InputDecoration(
-              labelText: 'سنة الصنع (اختياري)',
-              hintText: '2021',
-            ),
-            keyboardType: TextInputType.number,
-            textAlign: TextAlign.right,
-          ),
-          const SizedBox(height: 12),
-          TextFormField(
-            controller: _insuranceController,
-            decoration: const InputDecoration(
-              labelText: 'تاريخ انتهاء التأمين',
-              hintText: '2025-12-31',
-            ),
-            textAlign: TextAlign.right,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildInfoCard({
-    required IconData icon,
-    required String label,
-    required String value,
-  }) {
-    return Card(
-      elevation: 0,
-      color: DarbakColors.cardBackground,
-      margin: const EdgeInsets.only(bottom: 10),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      child: ListTile(
-        leading: Icon(icon, color: DarbakColors.primaryGreen),
-        title: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 12,
-            color: DarbakColors.textSecondary,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        subtitle: Text(
-          value,
-          style: const TextStyle(
-            fontSize: 14,
-            color: DarbakColors.dark,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ),
-    );
-  }
 }

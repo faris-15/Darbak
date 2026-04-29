@@ -44,6 +44,7 @@ dependencies:
   url_launcher: ^6.2.5       # (اختياري) لفتح روابط الخرائط الخارجية
   image_picker: ^0.8.7+6
   google_fonts: ^6.0.0       # Cairo font support
+  intl: ^0.18.1
 
 dev_dependencies:
   flutter_test:

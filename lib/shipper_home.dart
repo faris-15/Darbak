@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import 'app_theme.dart';
 import 'api_service.dart';
 import 'location_picker_screens.dart';
-import 'shipment_screens.dart';
 import 'shipment_bids_detail_screen.dart';
 import 'trip_screens.dart';
 
@@ -79,9 +79,86 @@ class ShipperShipmentsScreen extends StatefulWidget {
 }
 
 class _ShipperShipmentsScreenState extends State<ShipperShipmentsScreen> {
+  static const int _maxActiveShipments = 5;
+  static const Set<String> _activeStatuses = {
+    'pending',
+    'bidding',
+    'assigned',
+    'at_pickup',
+    'en_route',
+    'at_dropoff',
+  };
+
   List<Map<String, dynamic>> _shipments = [];
   bool _loading = true;
   String? _error;
+
+  int get _activeShipmentsCount => _shipments
+      .where((s) => _activeStatuses.contains((s['status'] ?? '').toString()))
+      .length;
+
+  Color get _activeProgressColor {
+    if (_activeShipmentsCount >= _maxActiveShipments) return Colors.red;
+    if (_activeShipmentsCount == _maxActiveShipments - 1) return Colors.orange;
+    return DarbakColors.primaryGreen;
+  }
+
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'bidding':
+        return 'في المزاد';
+      case 'assigned':
+        return 'مُسندة لسائق';
+      case 'delivered':
+        return 'تم التسليم';
+      case 'pending':
+        return 'قيد الانتظار';
+      case 'at_pickup':
+        return 'عند التحميل';
+      case 'en_route':
+        return 'في الطريق';
+      case 'at_dropoff':
+        return 'عند التسليم';
+      default:
+        return status;
+    }
+  }
+
+  Color _statusChipColor(String status) {
+    switch (status) {
+      case 'bidding':
+        return Colors.orange.shade100;
+      case 'assigned':
+        return Colors.blue.shade100;
+      case 'delivered':
+        return Colors.green.shade100;
+      default:
+        return Colors.grey.shade200;
+    }
+  }
+
+  Color _statusTextColor(String status) {
+    switch (status) {
+      case 'bidding':
+        return Colors.orange.shade900;
+      case 'assigned':
+        return Colors.blue.shade900;
+      case 'delivered':
+        return Colors.green.shade900;
+      default:
+        return Colors.grey.shade800;
+    }
+  }
+
+  String _formatExpectedDate(dynamic rawDate) {
+    if (rawDate == null) return 'غير محدد';
+    try {
+      final parsed = DateTime.parse(rawDate.toString());
+      return DateFormat('dd-MM-yyyy').format(parsed);
+    } catch (_) {
+      return rawDate.toString();
+    }
+  }
 
   @override
   void initState() {
@@ -136,43 +213,50 @@ class _ShipperShipmentsScreenState extends State<ShipperShipmentsScreen> {
           // شريط أعلى + زر شحنة جديدة
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              alignment: WrapAlignment.end,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
+                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: DarbakColors.cardBackground,
-                    borderRadius: BorderRadius.circular(999),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Directionality(
-                    textDirection: TextDirection.rtl,
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.inventory_2_rounded,
-                          size: 18,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'الشحنات النشطة: ($_activeShipmentsCount/$_maxActiveShipments)',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
                           color: DarbakColors.dark,
                         ),
-                        SizedBox(width: 8),
-                        Text(
-                          'الشحنات النشطة: ${_shipments.length}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: DarbakColors.dark,
-                          ),
+                      ),
+                      const SizedBox(height: 10),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          minHeight: 9,
+                          value: (_activeShipmentsCount / _maxActiveShipments)
+                              .clamp(0.0, 1.0),
+                          color: _activeProgressColor,
+                          backgroundColor: Colors.grey.shade300,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.end,
+                  children: [
                 ElevatedButton.icon(
-                  onPressed: () async {
+                  onPressed: _activeShipmentsCount >= _maxActiveShipments
+                      ? null
+                      : () async {
                     await Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => const CreateShipmentScreen(),
@@ -191,19 +275,7 @@ class _ShipperShipmentsScreenState extends State<ShipperShipmentsScreen> {
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                   ),
                 ),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const ShipperBidsListScreen(),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.gavel_outlined),
-                  label: const Text(
-                    'عرض العروض',
-                    style: TextStyle(fontSize: 13),
-                  ),
+                  ],
                 ),
               ],
             ),
@@ -248,46 +320,51 @@ class _ShipperShipmentsScreenState extends State<ShipperShipmentsScreen> {
                     itemCount: _shipments.length,
                     itemBuilder: (context, index) {
                       final shipment = _shipments[index];
+                      final status = (shipment['status'] ?? '').toString();
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
+                        elevation: 3.5,
                         child: Padding(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(18),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text(
-                                    'شحنة #${shipment['id']}',
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 16,
+                                  Expanded(
+                                    child: Text(
+                                      '${shipment['pickup_address'] ?? '-'} ➔ ${shipment['dropoff_address'] ?? '-'}',
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 16,
+                                      ),
                                     ),
                                   ),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                     decoration: BoxDecoration(
-                                      color: shipment['status'] == 'bidding' ? Colors.green.shade100 : Colors.grey.shade100,
-                                      borderRadius: BorderRadius.circular(12),
+                                      color: _statusChipColor(status),
+                                      borderRadius: BorderRadius.circular(999),
                                     ),
                                     child: Text(
-                                      shipment['status'] == 'bidding' ? 'في المزاد' : shipment['status'],
+                                      _statusLabel(status),
                                       style: TextStyle(
-                                        color: shipment['status'] == 'bidding' ? Colors.green : Colors.grey,
+                                        color: _statusTextColor(status),
+                                        fontWeight: FontWeight.w600,
                                         fontSize: 12,
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: 8),
-                              Text('من: ${shipment['pickup_address']}'),
-                              Text('إلى: ${shipment['dropoff_address']}'),
+                              const SizedBox(height: 14),
                               Text('الوزن: ${shipment['weight_kg']} طن'),
                               Text('السعر الأساسي: ${shipment['base_price']} ريال'),
-                              Text('الموعد النهائي: ${shipment['expected_delivery_date']}'),
-                              const SizedBox(height: 12),
+                              Text(
+                                'الموعد النهائي: ${_formatExpectedDate(shipment['expected_delivery_date'])}',
+                              ),
+                              const SizedBox(height: 16),
                               // View Bids button - only show for bidding status
                               if (shipment['status'] == 'bidding')
                                 SizedBox(
@@ -308,6 +385,32 @@ class _ShipperShipmentsScreenState extends State<ShipperShipmentsScreen> {
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: DarbakColors.primaryGreen,
                                       padding: const EdgeInsets.symmetric(vertical: 12),
+                                    ),
+                                  ),
+                                ),
+                              if ([
+                                'assigned',
+                                'at_pickup',
+                                'en_route',
+                                'at_dropoff',
+                              ].contains(status))
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 8),
+                                  child: SizedBox(
+                                    width: double.infinity,
+                                    child: OutlinedButton.icon(
+                                      onPressed: () {
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => ChatScreen(
+                                              shipmentId: shipment['id'].toString(),
+                                              otherUser: 'محادثة الرحلة',
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      icon: const Icon(Icons.chat_bubble_rounded),
+                                      label: const Text('محادثة السائق'),
                                     ),
                                   ),
                                 ),
@@ -340,9 +443,12 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
   final TextEditingController _distanceController = TextEditingController();
   final TextEditingController _cargoTypeController = TextEditingController();
   final TextEditingController _basePriceController = TextEditingController();
+  final TextEditingController _specialInstructionsController =
+      TextEditingController();
 
   DateTime? _selectedDate;
   String _selectedPeriod = 'morning';
+  int _auctionDurationHours = 24;
   bool _isSubmitting = false;
 
   // بيانات موقع التحميل
@@ -363,6 +469,7 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
     _distanceController.dispose();
     _cargoTypeController.dispose();
     _basePriceController.dispose();
+    _specialInstructionsController.dispose();
     super.dispose();
   }
 
@@ -559,6 +666,16 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                     maxLines: 2,
                     validatorMsg: 'الرجاء كتابة وصف مختصر للحمولة',
                   ),
+                  const SizedBox(height: 12),
+
+                  // التعليمات الخاصة (اختياري)
+                  _buildTextField(
+                    label: 'التعليمات الخاصة (اختياري)',
+                    controller: _specialInstructionsController,
+                    maxLines: 3,
+                    isRequired: false,
+                    validatorMsg: '',
+                  ),
                   const SizedBox(height: 16),
 
                   Text(
@@ -622,6 +739,26 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                       });
                     },
                   ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<int>(
+                    value: _auctionDurationHours,
+                    decoration: const InputDecoration(
+                      labelText: 'مدة المزاد (بالساعات)',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 2, child: Text('2 ساعة')),
+                      DropdownMenuItem(value: 6, child: Text('6 ساعات')),
+                      DropdownMenuItem(value: 12, child: Text('12 ساعة')),
+                      DropdownMenuItem(value: 24, child: Text('24 ساعة')),
+                    ],
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setState(() {
+                        _auctionDurationHours = value;
+                      });
+                    },
+                  ),
                   // if (_selectedDateTime == null) ...[
                   //   Padding(
                   //     padding: const EdgeInsets.only(top: 4),
@@ -647,34 +784,42 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
 
                       setState(() => _isSubmitting = true);
 
-                      final prefs = await SharedPreferences.getInstance();
-                      final shipperId = prefs.getInt('user_id');
-
-                      if (shipperId == null) {
-                        setState(() => _isSubmitting = false);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('لم يتم العثور على بيانات المستخدم'),
-                          ),
-                        );
-                        return;
-                      }
-
                       try {
                         // Format date as YYYY-MM-DD
                         final formattedDate = '${_selectedDate!.year.toString().padLeft(4, '0')}-${_selectedDate!.month.toString().padLeft(2, '0')}-${_selectedDate!.day.toString().padLeft(2, '0')}';
 
+                        if (pickupLat == null ||
+                            pickupLng == null ||
+                            dropoffLat == null ||
+                            dropoffLng == null) {
+                          setState(() => _isSubmitting = false);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'يرجى تحديد موقعي التحميل والتسليم على الخريطة أولاً',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+
                         final created = await ApiService.createShipment({
-                          'shipperId': shipperId,
                           'weightKg':
                               double.tryParse(_weightController.text.trim()) ?? 0.0,
                           'cargoDescription': _cargoTypeController.text.trim(),
                           'pickupAddress': _fromController.text.trim(),
                           'dropoffAddress': _toController.text.trim(),
+                          'pickupLat': pickupLat,
+                          'pickupLng': pickupLng,
+                          'dropoffLat': dropoffLat,
+                          'dropoffLng': dropoffLng,
                           'basePrice':
                               double.tryParse(_basePriceController.text.trim()) ?? 0.0,
                           'expectedDeliveryDate': formattedDate,
                           'period': _selectedPeriod,
+                          'auctionDurationHours': _auctionDurationHours,
+                          'specialInstructions':
+                              _specialInstructionsController.text.trim(),
                         });
 
                         debugPrint('Shipment created successfully: $created');
@@ -687,16 +832,8 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                       } catch (e) {
                         setState(() => _isSubmitting = false);
                         debugPrint('Shipment creation error: $e');
-                        String errorMessage = 'خطأ: يرجى التأكد من تعبئة جميع الحقول';
-                        if (e.toString().contains('جميع الحقول مطلوبة')) {
-                          errorMessage = 'خطأ: يرجى التأكد من تعبئة جميع الحقول';
-                        } else if (e.toString().contains('السعر الأساسي يجب أن يكون أكبر من صفر')) {
-                          errorMessage = 'خطأ: السعر الأساسي يجب أن يكون أكبر من صفر';
-                        } else if (e.toString().contains('الوزن يجب أن يكون أكبر من صفر')) {
-                          errorMessage = 'خطأ: الوزن يجب أن يكون أكبر من صفر';
-                        }
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(errorMessage)),
+                          SnackBar(content: Text(e.toString())),
                         );
                       }
                     },
@@ -723,6 +860,7 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
     required String validatorMsg,
     TextInputType keyboardType = TextInputType.text,
     int maxLines = 1,
+    bool isRequired = true,
   }) {
     return TextFormField(
       controller: controller,
@@ -730,7 +868,7 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
       maxLines: maxLines,
       decoration: InputDecoration(labelText: label),
       validator: (value) {
-        if (value == null || value.trim().isEmpty) {
+        if (isRequired && (value == null || value.trim().isEmpty)) {
           return validatorMsg;
         }
         return null;

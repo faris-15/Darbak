@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'app_theme.dart';
 import 'app_widgets.dart';
+import 'api_service.dart';
 
 /// شاشة تتبع الرحلة (Timeline) للسائق والشاحن
 class TripTrackingScreen extends StatefulWidget {
@@ -623,11 +626,13 @@ class _PenaltyDetailRow extends StatelessWidget {
 class ChatScreen extends StatefulWidget {
   final String shipmentId;
   final String otherUser;
+  final int? otherUserId;
 
   const ChatScreen({
     super.key,
     required this.shipmentId,
     required this.otherUser,
+    this.otherUserId,
   });
 
   @override
@@ -635,25 +640,84 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> {
-  final List<Map<String, dynamic>> _messages = [
-    {'text': 'مرحبا، كيف أستلم الشحنة؟', 'isMe': false},
-    {'text': 'التوقيت منسق، سأبلغك عند الوصول.', 'isMe': true},
-  ];
+  final List<Map<String, dynamic>> _messages = [];
   final TextEditingController _controller = TextEditingController();
+  Timer? _poller;
+  bool _loading = true;
+  int? _myUserId;
+  int? _resolvedOtherUserId;
 
-  void _sendMessage() {
+  @override
+  void initState() {
+    super.initState();
+    _bootstrap();
+    _poller = Timer.periodic(const Duration(seconds: 3), (_) => _loadMessages());
+  }
+
+  Future<void> _bootstrap() async {
+    await _resolveUsers();
+    await _loadMessages();
+  }
+
+  Future<void> _resolveUsers() async {
+    if (widget.otherUserId != null) {
+      _resolvedOtherUserId = widget.otherUserId;
+    }
+    final shipmentIdInt = int.tryParse(widget.shipmentId);
+    if (shipmentIdInt == null) return;
+    final shipment = await ApiService.getShipment(shipmentIdInt);
+    final prefs = await SharedPreferences.getInstance();
+    _myUserId = prefs.getInt('user_id');
+    final isDriver = prefs.getString('user_role') == 'driver';
+    _resolvedOtherUserId ??= isDriver
+        ? (shipment['shipper_id'] as num?)?.toInt()
+        : (shipment['driver_id'] as num?)?.toInt();
+  }
+
+  Future<void> _loadMessages() async {
+    final shipmentIdInt = int.tryParse(widget.shipmentId);
+    if (shipmentIdInt == null) return;
+    try {
+      final rows = await ApiService.getChatMessages(shipmentIdInt);
+      if (!mounted) return;
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(rows.map((e) => Map<String, dynamic>.from(e as Map)));
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _sendMessage() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
-    setState(() {
-      _messages.add({'text': text, 'isMe': true});
+    final shipmentIdInt = int.tryParse(widget.shipmentId);
+    if (shipmentIdInt == null || _resolvedOtherUserId == null) return;
+    try {
+      await ApiService.sendChatMessage(
+        shipmentId: shipmentIdInt,
+        receiverId: _resolvedOtherUserId!,
+        message: text,
+      );
       _controller.clear();
-      // محاكاة رد عكسي بسيط
-      Future.delayed(const Duration(milliseconds: 350), () {
-        setState(() {
-          _messages.add({'text': 'سأتأكد وأعود لك خلال دقائق.', 'isMe': false});
-        });
-      });
-    });
+      await _loadMessages();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر إرسال الرسالة: $e')),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _poller?.cancel();
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
@@ -665,12 +729,15 @@ class _ChatScreenState extends State<ChatScreen> {
       body: Column(
         children: [
           Expanded(
-            child: ListView.builder(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : ListView.builder(
               padding: const EdgeInsets.all(16),
               itemCount: _messages.length,
               itemBuilder: (context, index) {
                 final msg = _messages[index];
-                final isMe = msg['isMe'] as bool;
+                final senderId = (msg['sender_id'] as num?)?.toInt();
+                final isMe = senderId != null && senderId == _myUserId;
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Align(
@@ -691,7 +758,7 @@ class _ChatScreenState extends State<ChatScreen> {
                         vertical: 10,
                       ),
                       child: Text(
-                        msg['text'],
+                        (msg['message'] ?? '').toString(),
                         style: TextStyle(
                           color: isMe ? Colors.white : DarbakColors.dark,
                         ),

@@ -349,6 +349,7 @@ class _LoginScreenState extends State<LoginScreen> {
         _passwordController.text.trim(),
       );
       final user = data['user'];
+      final token = data['token']?.toString() ?? '';
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('is_logged_in', true);
@@ -356,6 +357,9 @@ class _LoginScreenState extends State<LoginScreen> {
       await prefs.setString('user_role', user['role']);
       await prefs.setString('user_email', user['email'] ?? '');
       await prefs.setString('user_name', user['full_name'] ?? '');
+      if (token.isNotEmpty) {
+        await prefs.setString('auth_token', token);
+      }
 
       if (user['role'] == 'driver') {
         Navigator.of(context).pushReplacement(
@@ -382,7 +386,10 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('تسجيل الدخول')),
+      appBar: AppBar(
+        title: const Text('تسجيل الدخول'),
+        automaticallyImplyLeading: false,
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -450,15 +457,31 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
+              Center(
                 child: TextButton(
                   onPressed: () {
                     // لاحقًا: شاشة نسيت كلمة المرور
                   },
-                  child: const Text(
-                    'نسيت كلمة المرور؟ استعادة كلمة المرور',
-                    style: TextStyle(fontSize: 12),
+                  child: const Text.rich(
+                    TextSpan(
+                      text: 'نسيت كلمة المرور؟ ',
+                      children: [
+                        TextSpan(
+                          text: 'استعادة كلمة المرور',
+                          style: TextStyle(
+                            color: DarbakColors.primaryGreen,
+                            decoration: TextDecoration.underline,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: DarbakColors.textSecondary,
+                    ),
                   ),
                 ),
               ),
@@ -473,26 +496,35 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 16),
               const SizedBox(height: 16),
               Center(
-                child: Wrap(
-                  alignment: WrapAlignment.center,
-                  children: [
-                    const Text(
-                      'ليس لديك حساب؟ ',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: DarbakColors.textSecondary,
+                child: Directionality(
+                  textDirection: TextDirection.rtl,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'ليس لديك حساب؟',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: DarbakColors.textSecondary,
+                        ),
                       ),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.of(context).pushNamed('/roleSelection');
-                      },
-                      child: const Text(
-                        'سجل الآن',
-                        style: TextStyle(fontSize: 13),
+                      TextButton(
+                        onPressed: () {
+                          Navigator.of(context).pushNamed('/roleSelection');
+                        },
+                        child: const Text(
+                          'سجل الآن',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: DarbakColors.primaryGreen,
+                            fontWeight: FontWeight.w700,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -526,6 +558,9 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   final _commercialNoController = TextEditingController();
   final _issueDateController = TextEditingController();
   final _expiryDateController = TextEditingController();
+  final _truckTypeController = TextEditingController();
+  final _plateNumberController = TextEditingController();
+  final _isthimaraNoController = TextEditingController();
 
   String? _documentPath;
   bool _loading = false;
@@ -539,6 +574,9 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     _commercialNoController.dispose();
     _issueDateController.dispose();
     _expiryDateController.dispose();
+    _truckTypeController.dispose();
+    _plateNumberController.dispose();
+    _isthimaraNoController.dispose();
     super.dispose();
   }
 
@@ -592,6 +630,15 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             : null,
         'expiryDate': widget.role == 'driver'
             ? _expiryDateController.text.trim()
+            : null,
+        'truckType': widget.role == 'driver'
+            ? _truckTypeController.text.trim()
+            : null,
+        'plateNumber': widget.role == 'driver'
+            ? _plateNumberController.text.trim()
+            : null,
+        'isthimaraNo': widget.role == 'driver'
+            ? _isthimaraNoController.text.trim()
             : null,
       };
 
@@ -713,6 +760,27 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                         _expiryDateController.text = picked.toIso8601String().split('T')[0];
                       }
                     },
+                  ),
+                  TextFormField(
+                    controller: _truckTypeController,
+                    decoration: const InputDecoration(
+                      labelText: 'نوع الشاحنة',
+                    ),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'مطلوب' : null,
+                  ),
+                  TextFormField(
+                    controller: _plateNumberController,
+                    decoration: const InputDecoration(
+                      labelText: 'رقم اللوحة',
+                    ),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'مطلوب' : null,
+                  ),
+                  TextFormField(
+                    controller: _isthimaraNoController,
+                    decoration: const InputDecoration(
+                      labelText: 'رقم الاستمارة',
+                    ),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'مطلوب' : null,
                   ),
                 ],
                 if (widget.role == 'shipper')

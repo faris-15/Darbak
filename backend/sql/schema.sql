@@ -30,8 +30,11 @@ CREATE TABLE IF NOT EXISTS shipments (
     dropoff_address VARCHAR(255) NOT NULL,
     base_price DECIMAL(10,2) NOT NULL,
     final_price DECIMAL(10,2) NULL,
-    period INT(11) NULL COMMENT 'Time period in days',
-    status ENUM('pending', 'bidding', 'assigned', 'on_way', 'delivered', 'cancelled') DEFAULT 'pending',
+    period VARCHAR(20) NULL,
+    special_instructions TEXT NULL,
+    auction_duration_hours INT(11) NOT NULL DEFAULT 24,
+    auction_end_time DATETIME NULL,
+    status ENUM('pending', 'bidding', 'assigned', 'at_pickup', 'en_route', 'at_dropoff', 'delivered', 'cancelled') DEFAULT 'pending',
     expected_delivery_date DATETIME NOT NULL,
     actual_delivery_date DATETIME NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -51,11 +54,55 @@ CREATE TABLE IF NOT EXISTS bids (
     FOREIGN KEY (shipment_id) REFERENCES shipments(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS shipment_status_history (
+    id INT(11) NOT NULL AUTO_INCREMENT,
+    shipment_id INT(11) NOT NULL,
+    status ENUM('assigned', 'at_pickup', 'en_route', 'at_dropoff', 'delivered') NOT NULL,
+    location_lat DECIMAL(10,7) NULL,
+    location_lng DECIMAL(10,7) NULL,
+    photo_path VARCHAR(500) NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    INDEX idx_shipment_updated (shipment_id, updated_at),
+    FOREIGN KEY (shipment_id) REFERENCES shipments(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS wallets (
     id INT(11) NOT NULL AUTO_INCREMENT,
     user_id INT(11) NOT NULL,
     current_balance DECIMAL(15,2) DEFAULT 0.00,
     PRIMARY KEY (id),
     FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS trucks (
+    id INT(11) NOT NULL AUTO_INCREMENT,
+    user_id INT(11) NOT NULL,
+    plate_number VARCHAR(20) NOT NULL,
+    isthimara_no TEXT NOT NULL,
+    truck_type VARCHAR(100) NOT NULL,
+    capacity_kg DECIMAL(10,2) NOT NULL,
+    manufacturing_year INT(4) NULL,
+    insurance_expiry_date DATE NULL,
+    is_active TINYINT(1) NOT NULL DEFAULT 0,
+    verification_status ENUM('pending', 'verified', 'rejected') DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uniq_plate_number (plate_number),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS messages (
+    id INT(11) NOT NULL AUTO_INCREMENT,
+    shipment_id INT(11) NOT NULL,
+    sender_id INT(11) NOT NULL,
+    receiver_id INT(11) NOT NULL,
+    message TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_messages_shipment_created (shipment_id, created_at),
+    FOREIGN KEY (shipment_id) REFERENCES shipments(id) ON DELETE CASCADE,
+    FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
