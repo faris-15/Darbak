@@ -1,16 +1,16 @@
-# darbak
+```mermaid
+gantt
+    title  Darbak 
+    dateFormat  YYYY-MM-DD
+    axisFormat  %m-%d
 
-A new Flutter project.
+    section Sprint 1 (Core)
+    Develop core features           :active, dev1, 2026-04-12, 10d
+    Testing & Bug Fixing            :active, test1, 2026-04-18, 7d
 
-## Getting Started
+    section Sprint 2 (Final)
+    Finalize features               :        dev2, 2026-04-26, 9d
+    Performance Testing             :        test2, 2026-05-01, 8d
 
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+    section Release Sprint
+    System Stabilization            :        release, 2026-05-10, 7d
