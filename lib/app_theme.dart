@@ -33,7 +33,7 @@ class DarbakTheme {
 
   static ThemeData lightTheme = ThemeData(
     useMaterial3: true,
-    fontFamily: 'Cairo', // لو ما عندك الخط، يمكنك حذفه
+    fontFamily: '29LT Bukra',
     colorScheme: ColorScheme.fromSeed(
       seedColor: DarbakColors.primaryGreen,
       primary: DarbakColors.primaryGreen,

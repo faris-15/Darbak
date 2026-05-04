@@ -1,13 +1,14 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { addRating, getUserRatings, updateRating, deleteRating } = require('../controllers/ratingController');
+const { requireAuth } = require('../middleware/authMiddleware');
 const router = express.Router();
 
 router.post(
   '/',
+  requireAuth,
   [
     body('shipment_id').isInt({ min: 1 }),
-    body('rater_id').isInt({ min: 1 }),
     body('rated_id').isInt({ min: 1 }),
     body('stars').isInt({ min: 1, max: 5 }),
     body('comment').optional().isString(),
@@ -24,7 +25,8 @@ router.get('/user/:userId', getUserRatings);
 router.put(
   '/:ratingId',
   [
-    body('ratingStars').isInt({ min: 1, max: 5 }),
+    body('stars').isInt({ min: 1, max: 5 }),
+    body('comment').optional().isString(),
   ],
   (req, res) => {
     const errors = validationResult(req);

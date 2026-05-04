@@ -1,8 +1,19 @@
 const Bid = require('../models/Bid');
 const Shipment = require('../models/Shipment');
 const Notification = require('../models/Notification');
+const User = require('../models/User');
 const { decryptText } = require('../utils/encryption');
 const pool = require('../config/db');
+
+const isLicenseExpired = (expiryDate) => {
+  if (!expiryDate) return false;
+  const d = new Date(expiryDate);
+  if (Number.isNaN(d.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  d.setHours(0, 0, 0, 0);
+  return d < today;
+};
 
 const createBid = async (req, res) => {
   try {
@@ -17,6 +28,13 @@ const createBid = async (req, res) => {
     }
     if (req.user?.role !== 'driver') {
       return res.status(403).json({ message: 'فقط السائق يمكنه تقديم عرض' });
+    }
+
+    const driverUser = await User.findById(driverId);
+    if (driverUser && isLicenseExpired(driverUser.expiry_date)) {
+      return res.status(403).json({
+        message: 'انتهت صلاحية رخصة القيادة. لا يمكنك تقديم عروض حتى تجدد الرخصة.',
+      });
     }
 
     // Check shipment exists and is in bidding status
@@ -71,15 +89,24 @@ const createBid = async (req, res) => {
     // Notify shipper of new bid
     try {
       await Notification.create({
-        userId: shipment.shipper_id,
-        notificationType: 'new_bid',
+        user_id: shipment.shipper_id,
         title: 'عرض جديد',
-        message: `حصلت على عرض جديد بسعر ${bidAmount} ريال`,
-        relatedShipmentId: shipmentId,
-        relatedBidId: bid.id,
+        message: `حصلت على عرض جديد بسعر ${bidAmount} ريال للشحنة #${shipmentId}`,
+        is_read: 0,
       });
     } catch (notifError) {
       console.warn('[Bid.createBid] Notification error:', notifError.message);
+    }
+
+    try {
+      const { sendPushToUser } = require('../utils/fcmPush');
+      await sendPushToUser(shipment.shipper_id, {
+        title: 'عرض جديد',
+        body: `عرض جديد بسعر ${bidAmount} ريال على الشحنة #${shipmentId}`,
+        data: { type: 'new_bid', shipmentId: String(shipmentId), bidId: String(bid.id) },
+      });
+    } catch (pushErr) {
+      console.warn('[Bid.createBid] Push error:', pushErr.message);
     }
 
     res.status(201).json({ 
@@ -231,16 +258,25 @@ const acceptBid = async (req, res) => {
       // Notify driver of acceptance
       try {
         await Notification.create({
-          userId: driverId,
-          notificationType: 'bid_accepted',
+          user_id: driverId,
           title: 'تم قبول عرضك',
           message: `تم قبول عرضك للشحنة رقم ${shipmentId}`,
-          relatedShipmentId: shipmentId,
-          relatedBidId: bidId,
+          is_read: 0,
         });
         console.log('[Bid.acceptBid] Driver acceptance notification sent');
       } catch (notifError) {
         console.warn('[Bid.acceptBid] Notification error:', notifError.message);
+      }
+
+      try {
+        const { sendPushToUser } = require('../utils/fcmPush');
+        await sendPushToUser(driverId, {
+          title: 'تم قبول عرضك',
+          body: `تم قبول عرضك للشحنة #${shipmentId}`,
+          data: { type: 'bid_accepted', shipmentId: String(shipmentId), bidId: String(bidId) },
+        });
+      } catch (pushErr) {
+        console.warn('[Bid.acceptBid] Push error:', pushErr.message);
       }
 
       // Get other drivers for rejection notifications
@@ -253,11 +289,10 @@ const acceptBid = async (req, res) => {
       for (const otherBid of otherBids) {
         try {
           await Notification.create({
-            userId: otherBid.driver_id,
-            notificationType: 'bid_rejected',
+            user_id: otherBid.driver_id,
             title: 'تم رفض عرضك',
             message: `تم اختيار عرض آخر للشحنة رقم ${shipmentId}`,
-            relatedShipmentId: shipmentId,
+            is_read: 0,
           });
         } catch (notifError) {
           console.warn('[Bid.acceptBid] Rejection notification error:', notifError.message);
@@ -266,6 +301,22 @@ const acceptBid = async (req, res) => {
 
       console.log('[Bid.acceptBid] Rejection notifications sent to', otherBids.length, 'drivers');
 
+      let contract_pdf_key = null;
+      try {
+        const { generateAndStoreShipmentContract } = require('../services/contractPdfService');
+        const shipperUser = await User.findById(shipment.shipper_id);
+        const driverUser = await User.findById(driverId);
+        const shipmentForPdf = { ...shipment, status: 'assigned', driver_id: driverId };
+        contract_pdf_key = await generateAndStoreShipmentContract({
+          shipment: shipmentForPdf,
+          bid,
+          shipperName: shipperUser?.full_name,
+          driverName: driverUser?.full_name,
+        });
+      } catch (cErr) {
+        console.warn('[Bid.acceptBid] contract generation:', cErr.message);
+      }
+
       return res.status(200).json({
         success: true,
         message: 'تم قبول العرض بنجاح',
@@ -273,6 +324,7 @@ const acceptBid = async (req, res) => {
         shipmentId,
         driverId,
         status: 'accepted',
+        contract_pdf_key,
       });
     } finally {
       await connection.release();

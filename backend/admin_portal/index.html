@@ -1,0 +1,1373 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Darbak Pro | لوحة التحكم المتطورة</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Kufi+Arabic:wght@300;400;700;900&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: { DEFAULT: '#088A3B', 50: '#E8F5E9', 100: '#C8E6C9', 400: '#66BB6A', 500: '#4CAF50', 600: '#43A047' },
+                        darbak: { dark: '#1A1A1A', gold: '#FFD700', gray: '#F4F4F4' }
+                    },
+                    fontFamily: { sans: ['Noto Kufi Arabic', 'sans-serif'] }
+                }
+            }
+        }
+    </script>
+    <style>
+        body { background-color: #F8FAFC; color: #1E293B; }
+        .sidebar { width: 280px; height: 100vh; position: fixed; right: 0; top: 0; background: #FFF; z-index: 50; border-left: 1px solid #E2E8F0; }
+        .main-content { margin-right: 280px; min-height: 100vh; }
+        .nav-link { display: flex; align-items: center; gap: 12px; padding: 12px 24px; color: #64748B; font-weight: 600; transition: all 0.2s; cursor: pointer; border-radius: 12px; margin: 4px 16px; }
+        .nav-link:hover { background: #F1F5F9; color: #088A3B; }
+        .nav-link.active { background: #E8F5E9; color: #088A3B; border-right: 4px solid #088A3B; }
+        .card { background: white; border-radius: 20px; box-shadow: 0 4px 20px -5px rgba(0,0,0,0.05); border: 1px solid #F1F5F9; transition: transform 0.2s; }
+        .card:hover { transform: translateY(-2px); }
+        .pulse-dot { width: 8px; height: 8px; background: #10B981; border-radius: 50%; position: relative; }
+        .pulse-dot::after { content: ''; position: absolute; width: 100%; height: 100%; background: inherit; border-radius: inherit; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(3); opacity: 0; } }
+        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; backdrop-filter: blur(8px); }
+        .modal-content { background: white; width: 95%; max-width: 900px; margin: 30px auto; border-radius: 24px; overflow: hidden; display: flex; flex-direction: column; max-height: 90vh; min-height: 0; }
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        #activity-feed { -webkit-overflow-scrolling: touch; }
+    </style>
+</head>
+<body class="antialiased font-sans">
+    <!-- Sidebar -->
+    <aside class="sidebar shadow-sm">
+        <div class="p-8 flex items-center gap-4 border-b mb-6">
+            <div class="w-14 h-14 bg-white rounded-2xl flex items-center justify-center overflow-hidden border-2 border-slate-50 shadow-md">
+                <img src="/assets/animations/assets-logo.jpeg" class="w-full h-full object-cover" alt="Logo" onerror="this.src='https://ui-avatars.com/api/?name=D&background=088A3B&color=fff'">
+            </div>
+            <div>
+                <span class="text-2xl font-black tracking-tighter text-slate-800 block">دربك</span>
+                <span class="text-[10px] font-bold text-primary uppercase tracking-widest">نظام الإدارة</span>
+            </div>
+        </div>
+        <nav class="space-y-1">
+            <p class="px-8 text-[10px] font-bold text-slate-400 uppercase mb-4 tracking-widest">الرئيسية</p>
+            <a onclick="showSection('dashboard')" class="nav-link active" id="nav-dashboard"><i class="fas fa-chart-pie"></i> نظرة عامة</a>
+            <a onclick="showSection('users')" class="nav-link" id="nav-users"><i class="fas fa-user-friends"></i> إدارة المستخدمين</a>
+            <a onclick="showSection('shipments')" class="nav-link" id="nav-shipments"><i class="fas fa-truck-loading"></i> متابعة الشحنات</a>
+            <a onclick="showSection('financials')" class="nav-link" id="nav-financials"><i class="fas fa-wallet"></i> المالية والجزاءات</a>
+
+            <p class="px-8 text-[10px] font-bold text-slate-400 uppercase mt-8 mb-4 tracking-widest">الدعم والتحكم</p>
+            <a onclick="showSection('settings')" class="nav-link" id="nav-settings"><i class="fas fa-sliders"></i> الإعدادات</a>
+            <button id="logout-btn" class="nav-link text-rose-500 w-[calc(100%-32px)] mt-4"><i class="fas fa-power-off"></i> خروج آمن</button>
+        </nav>
+    </aside>
+
+    <!-- Login -->
+    <div id="login-screen" class="min-h-screen flex items-center justify-center bg-slate-100 fixed inset-0 z-[3000]">
+        <div class="bg-white p-12 rounded-[40px] shadow-2xl w-full max-w-md border border-slate-200">
+            <div class="text-center mb-10">
+                <img src="/assets/animations/assets-logo.jpeg" class="w-24 h-24 mx-auto rounded-3xl shadow-lg mb-6 object-cover">
+                <h1 class="text-3xl font-black text-slate-800">مرحباً بك مجدداً</h1>
+                <p class="text-slate-400 mt-2">تسجيل الدخول للوحة التحكم المركزية</p>
+            </div>
+            <form id="login-form" class="space-y-5">
+                <input type="text" id="identifier" class="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-primary transition-all" placeholder="البريد الإلكتروني / الجوال" required>
+                <input type="password" id="password" class="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-primary transition-all" placeholder="كلمة المرور" required>
+                <button type="submit" class="w-full bg-primary text-white py-4 rounded-2xl font-bold hover:brightness-110 shadow-lg shadow-primary/20 transition-all">دخول النظام</button>
+            </form>
+            <p id="login-error" class="text-rose-500 mt-6 text-center hidden font-bold text-sm bg-rose-50 p-3 rounded-xl border border-rose-100"></p>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-100 px-10 py-6 flex justify-between items-center">
+            <div>
+                <h2 id="section-title" class="font-black text-2xl text-slate-800">لوحة التحكم</h2>
+                <div class="flex items-center gap-2 text-slate-400 text-xs mt-1">
+                    <span id="current-date"></span>
+                    <span class="w-1 h-1 bg-slate-300 rounded-full"></span>
+                    <span id="server-status" class="flex items-center gap-1"><span class="pulse-dot"></span> متصل بالسيرفر</span>
+                </div>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="relative">
+                    <button type="button" id="notif-toggle" onclick="toggleNotifPanel()" class="relative w-12 h-12 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-200 transition">
+                        <i class="fas fa-bell"></i>
+                        <span id="notif-badge" class="hidden absolute -top-1 -left-1 min-w-[20px] h-5 px-1 bg-rose-500 text-white text-[10px] font-black rounded-full flex items-center justify-center">0</span>
+                    </button>
+                    <div id="notif-panel" class="hidden absolute left-0 mt-2 w-96 max-h-[420px] overflow-y-auto bg-white rounded-2xl shadow-2xl border border-slate-100 z-50">
+                        <div class="p-4 border-b flex justify-between items-center sticky top-0 bg-white">
+                            <span class="font-black text-sm text-slate-800">مركز الإشعارات</span>
+                            <button type="button" onclick="markAllNotifsRead()" class="text-[10px] font-bold text-primary hover:underline">تعليم الكل كمقروء</button>
+                        </div>
+                        <div id="notif-list" class="divide-y divide-slate-50"></div>
+                    </div>
+                </div>
+                <div class="flex items-center gap-4 bg-slate-100 p-2 pr-5 rounded-2xl border border-slate-200">
+                    <div class="text-right">
+                        <p class="text-sm font-black text-slate-800">مدير النظام</p>
+                        <span class="text-[9px] text-emerald-600 font-bold">بصلاحيات كاملة</span>
+                    </div>
+                    <div class="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white font-black">AD</div>
+                </div>
+            </div>
+        </header>
+
+        <div class="px-3 sm:px-4 lg:px-5 py-10 space-y-10 w-full min-w-0">
+            <!-- Dashboard View -->
+            <div id="dashboard-section" class="section-content">
+                <!-- Summary metrics -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+                    <div class="card p-6 border-l-4 border-l-emerald-500">
+                        <div class="w-11 h-11 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600 text-lg mb-3"><i class="fas fa-users"></i></div>
+                        <p class="text-slate-400 font-bold text-[10px] uppercase tracking-wider">إجمالي المستخدمين</p>
+                        <h2 id="total-users" class="text-2xl font-black text-slate-800 mt-1">0</h2>
+                        <p class="text-[10px] text-slate-500 mt-2 font-bold leading-relaxed"><span id="stat-drivers">0</span> سائق · <span id="stat-companies">0</span> شركة</p>
+                    </div>
+                    <div class="card p-6 border-l-4 border-l-blue-500">
+                        <div class="w-11 h-11 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 text-lg mb-3"><i class="fas fa-route"></i></div>
+                        <p class="text-slate-400 font-bold text-[10px] uppercase tracking-wider">رحلات نشطة</p>
+                        <h2 id="active-shipments" class="text-2xl font-black text-slate-800 mt-1">0</h2>
+                        <p class="text-[10px] text-slate-400 mt-2">معيّنة أو قيد التنفيذ</p>
+                    </div>
+                    <div class="card p-6 border-l-4 border-l-indigo-500">
+                        <div class="w-11 h-11 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 text-lg mb-3"><i class="fas fa-flag-checkered"></i></div>
+                        <p class="text-slate-400 font-bold text-[10px] uppercase tracking-wider">رحلات مكتملة</p>
+                        <h2 id="completed-trips-stat" class="text-2xl font-black text-slate-800 mt-1">0</h2>
+                    </div>
+                    <div class="card p-6 border-l-4 border-l-rose-500">
+                        <div class="flex justify-between items-start mb-3">
+                            <div class="w-11 h-11 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600 text-lg"><i class="fas fa-shield-halved"></i></div>
+                            <span id="pending-badge" class="text-[9px] font-black bg-rose-500 text-white px-2 py-0.5 rounded-full">مهم</span>
+                        </div>
+                        <p class="text-slate-400 font-bold text-[10px] uppercase tracking-wider">توثيق معلق</p>
+                        <h2 id="pending-count-stat" class="text-2xl font-black text-rose-600 mt-1">0</h2>
+                    </div>
+                    <div class="card p-6 border-l-4 border-l-teal-500">
+                        <div class="w-11 h-11 bg-teal-50 rounded-xl flex items-center justify-center text-teal-600 text-lg mb-3"><i class="fas fa-coins"></i></div>
+                        <p class="text-slate-400 font-bold text-[10px] uppercase tracking-wider">إجمالي الإيرادات</p>
+                        <h2 id="revenue-stat" class="text-2xl font-black text-teal-700 mt-1">0</h2>
+                        <p class="text-[10px] text-slate-400 mt-2">من الشحنات المكتملة</p>
+                    </div>
+                    <div class="card p-6 border-l-4 border-l-amber-500">
+                        <div class="w-11 h-11 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 text-lg mb-3"><i class="fas fa-gavel"></i></div>
+                        <p class="text-slate-400 font-bold text-[10px] uppercase tracking-wider">تظلمات مفتوحة</p>
+                        <h2 id="open-disputes-stat" class="text-2xl font-black text-amber-700 mt-1">0</h2>
+                        <p class="text-[10px] text-slate-400 mt-2">مزايدات معلقة: <span id="active-bids" class="font-black text-slate-600">0</span></p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-10 mt-10">
+                    <!-- Verification Center -->
+                    <div class="lg:col-span-8 space-y-8">
+                        <div class="card overflow-hidden">
+                            <div class="px-8 py-6 bg-slate-900 text-white flex justify-between items-center">
+                                <h3 class="font-black flex items-center gap-3"><i class="fas fa-user-check text-primary"></i> طلبات التوثيق الجديدة</h3>
+                                <span class="text-[10px] bg-white/10 px-3 py-1 rounded-full">يتطلب مراجعة دقيقة للمستندات</span>
+                            </div>
+                            <div class="px-6 py-4 bg-slate-50 flex flex-wrap gap-3 items-center justify-between border-b border-slate-100">
+                                <span class="text-[10px] text-slate-500 font-bold" id="pending-users-meta"></span>
+                                <div class="flex gap-2">
+                                    <button type="button" onclick="pendingUsersPrev()" class="px-4 py-2 rounded-xl bg-white border border-slate-200 text-[10px] font-black hover:border-primary text-slate-600">السابق</button>
+                                    <button type="button" onclick="pendingUsersNext()" class="px-4 py-2 rounded-xl bg-white border border-slate-200 text-[10px] font-black hover:border-primary text-slate-600">التالي</button>
+                                </div>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full">
+                                    <thead class="bg-slate-50">
+                                        <tr>
+                                            <th class="px-8 py-4 text-right text-[10px] font-black text-slate-400 uppercase">المستخدم</th>
+                                            <th class="px-4 py-4 text-right text-[10px] font-black text-slate-400 uppercase">نوع الحساب</th>
+                                            <th class="px-4 py-4 text-right text-[10px] font-black text-slate-400 uppercase">المستند المرفوع</th>
+                                            <th class="px-8 py-4 text-left text-[10px] font-black text-slate-400 uppercase">الإجراء</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="pending-users-body">
+                                        <tr><td colspan="4" class="py-20 text-center text-slate-300 italic">بانتظار طلبات جديدة...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Recent Shipments -->
+                        <div class="card overflow-hidden">
+                            <div class="px-8 py-6 border-b flex justify-between items-center">
+                                <h3 class="font-black text-slate-800">آخر التحركات في المنصة</h3>
+                                <button onclick="showSection('shipments')" class="text-[10px] font-black text-primary bg-primary/5 px-4 py-2 rounded-xl">عرض السجل الكامل</button>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full">
+                                    <tbody id="recent-shipments-body"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Live Pulse Feed (قائمة عمودية — النسخة السابقة) -->
+                    <div class="lg:col-span-4 flex flex-col gap-8 min-w-0">
+                        <div class="card flex-1 flex flex-col min-h-[500px] min-w-0 overflow-hidden">
+                            <div class="px-6 py-5 border-b bg-slate-50/50 flex flex-wrap items-center justify-between gap-3">
+                                <h3 class="font-black text-slate-800 flex items-center gap-3"><i class="fas fa-bolt-lightning text-amber-500"></i> النبض الحي (Real-time)</h3>
+                            </div>
+                            <p class="px-6 pt-3 text-[10px] text-slate-400 font-bold">آخر الأنشطة — مرّر للأسفل داخل الإطار</p>
+                            <div id="activity-feed" class="flex-1 min-h-0 min-w-0 w-full flex flex-col gap-3 overflow-y-auto overflow-x-hidden p-4 pb-4 min-h-[220px] max-h-[380px]">
+                                <!-- سيتم التعبئة بواسطة JavaScript -->
+                            </div>
+                            <div class="p-4 border-t bg-slate-50/80">
+                                <button type="button" id="activity-load-more" onclick="loadMoreActivity()" class="w-full py-3 rounded-xl bg-white border border-slate-200 text-xs font-black text-slate-600 hover:border-primary hover:text-primary transition">
+                                    تحميل المزيد
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="card p-8 bg-primary text-white">
+                            <h4 class="font-black mb-2">تحديثات النظام</h4>
+                            <p class="text-xs text-white/70 leading-relaxed">تم تفعيل نظام احتساب الجزاءات التلقائي (5% لكل يوم تأخير) لجميع الرحلات الجديدة.</p>
+                            <div class="mt-4 flex items-center gap-2">
+                                <i class="fas fa-check-double text-[10px]"></i>
+                                <span class="text-[9px] font-bold uppercase">Version 2.4.0 Active</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="financials-section" class="section-content hidden">
+                <div class="card overflow-hidden">
+                    <div class="p-8 border-b flex justify-between items-center bg-slate-50">
+                        <div>
+                            <h3 class="font-black text-2xl text-slate-800">المالية والتظلمات</h3>
+                            <p class="text-xs text-slate-500 mt-1">إدارة مديونيات السائقين ومراجعة طلبات الاعتراض على الجزاءات</p>
+                        </div>
+                        <div class="flex gap-4">
+                            <button onclick="loadDisputes()" class="bg-primary text-white px-6 py-2 rounded-xl font-bold text-sm hover:brightness-110 transition shadow-lg shadow-primary/20">تحديث البيانات</button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 p-8 bg-slate-50/50">
+                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                            <p class="text-[10px] font-bold text-slate-400 uppercase mb-1">إجمالي المديونيات</p>
+                            <h4 id="total-debt" class="text-2xl font-black text-rose-600">0 ريال</h4>
+                        </div>
+                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                            <p class="text-[10px] font-bold text-slate-400 uppercase mb-1">تظلمات قيد الانتظار</p>
+                            <h4 id="pending-disputes-count" class="text-2xl font-black text-amber-500">0</h4>
+                        </div>
+                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                            <p class="text-[10px] font-bold text-slate-400 uppercase mb-1">تحصيلات اليوم</p>
+                            <h4 class="text-2xl font-black text-emerald-600">0 ريال</h4>
+                        </div>
+                    </div>
+
+                    <div class="px-6 py-4 bg-white flex flex-wrap gap-3 border-b border-slate-100">
+                        <input type="text" id="disputes-search" placeholder="بحث سائق / رقم شحنة..." class="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary flex-1 min-w-[200px]">
+                        <select id="disputes-status" class="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary">
+                            <option value="">كل الحالات</option>
+                            <option value="open">مفتوح</option>
+                            <option value="approved">مقبول</option>
+                            <option value="rejected">مرفوض</option>
+                        </select>
+                        <button type="button" onclick="loadDisputes(1)" class="bg-slate-900 text-white px-5 py-2 rounded-xl text-xs font-black">تطبيق</button>
+                    </div>
+                    <div class="px-6 py-3 flex justify-between items-center bg-slate-50/50 text-[10px] text-slate-500 font-bold">
+                        <span id="disputes-page-meta"></span>
+                        <div class="flex gap-2">
+                            <button type="button" onclick="disputesPrev()" class="px-3 py-1 rounded-lg bg-white border border-slate-200">السابق</button>
+                            <button type="button" onclick="disputesNext()" class="px-3 py-1 rounded-lg bg-white border border-slate-200">التالي</button>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-right">
+                            <thead class="bg-slate-100/50">
+                                <tr class="text-[10px] font-black uppercase text-slate-500">
+                                    <th class="p-6">السائق</th>
+                                    <th class="p-6">نوع العملية</th>
+                                    <th class="p-6">قيمة الجزاء</th>
+                                    <th class="p-6">سبب التظلم</th>
+                                    <th class="p-6">التاريخ</th>
+                                    <th class="p-6 text-left">الإجراء</th>
+                                </tr>
+                            </thead>
+                            <tbody id="disputes-body">
+                                <tr><td colspan="6" class="py-20 text-center text-slate-300 italic">بانتظار جلب البيانات...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="users-section" class="section-content hidden">
+                <div class="card overflow-hidden w-full max-w-none">
+                    <div class="px-6 sm:px-8 py-6 bg-slate-800 text-white font-black text-right flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+                        <span>إدارة المستخدمين</span>
+                    </div>
+                    <div class="px-6 py-4 border-b bg-white flex flex-wrap gap-2 items-center">
+                        <button type="button" onclick="setUserRoleTab('')" id="tab-users-all" class="user-role-tab px-4 py-2 rounded-xl text-xs font-black bg-primary text-white">الكل</button>
+                        <button type="button" onclick="setUserRoleTab('driver')" id="tab-users-driver" class="user-role-tab px-4 py-2 rounded-xl text-xs font-black bg-slate-100 text-slate-600">السائقون</button>
+                        <button type="button" onclick="setUserRoleTab('shipper')" id="tab-users-shipper" class="user-role-tab px-4 py-2 rounded-xl text-xs font-black bg-slate-100 text-slate-600">الشركات</button>
+                    </div>
+                    <div class="p-6 bg-slate-50 border-b flex flex-wrap gap-3">
+                        <input type="text" id="users-search" placeholder="بحث بالاسم، البريد، الجوال..." class="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary flex-1 min-w-[200px]">
+                        <select id="users-verification" class="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary">
+                            <option value="">حالة التوثيق</option>
+                            <option value="pending">معلق</option>
+                            <option value="verified">موثّق</option>
+                            <option value="rejected">مرفوض</option>
+                        </select>
+                        <select id="users-active" class="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary">
+                            <option value="">نشاط الحساب</option>
+                            <option value="1">مفعّل</option>
+                            <option value="0">معطّل</option>
+                        </select>
+                        <input type="date" id="users-from" class="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-primary">
+                        <input type="date" id="users-to" class="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-primary">
+                        <button type="button" onclick="browseUsers(1)" class="bg-primary text-white px-6 py-2 rounded-xl text-xs font-black">تطبيق</button>
+                    </div>
+                    <div class="px-6 py-3 flex justify-between items-center bg-slate-50/50 border-b text-[10px] text-slate-500 font-bold">
+                        <span id="users-page-meta"></span>
+                        <div class="flex gap-2">
+                            <button type="button" onclick="browseUsers(Math.max(1, usersPager.page - 1))" class="px-3 py-1 rounded-lg bg-white border border-slate-200 font-bold">السابق</button>
+                            <button type="button" onclick="browseUsers(usersPager.page + 1)" class="px-3 py-1 rounded-lg bg-white border border-slate-200 font-bold">التالي</button>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-right">
+                            <thead>
+                                <tr class="bg-slate-100 text-[10px] font-black uppercase text-slate-500">
+                                    <th class="p-4">المستخدم</th>
+                                    <th class="p-4">الدور</th>
+                                    <th class="p-4">التوثيق</th>
+                                    <th class="p-4">الحساب</th>
+                                    <th class="p-4">التسجيل</th>
+                                    <th class="p-4 text-left">إجراءات</th>
+                                </tr>
+                            </thead>
+                            <tbody id="all-users-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div id="shipments-section" class="section-content hidden">
+                 <div class="card overflow-hidden w-full max-w-none">
+                    <div class="px-6 sm:px-8 py-6 bg-slate-800 text-white font-black text-right flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+                        <span>قائمة الشحنات</span>
+                    </div>
+                    <div class="p-6 bg-slate-50 border-b flex flex-wrap gap-3">
+                        <input type="text" id="shipments-search" placeholder="بحث رقم شحنة، عنوان، اسم..." class="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary flex-1 min-w-[200px]">
+                        <select id="shipments-status" class="bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary">
+                            <option value="">كل الحالات</option>
+                            <option value="pending">pending</option>
+                            <option value="bidding">bidding</option>
+                            <option value="assigned">assigned</option>
+                            <option value="at_pickup">at_pickup</option>
+                            <option value="en_route">en_route</option>
+                            <option value="at_dropoff">at_dropoff</option>
+                            <option value="delivered">delivered</option>
+                            <option value="cancelled">cancelled</option>
+                        </select>
+                        <input type="date" id="shipments-from" class="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-primary">
+                        <input type="date" id="shipments-to" class="bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-primary">
+                        <button type="button" onclick="browseShipments(1)" class="bg-primary text-white px-6 py-2 rounded-xl text-xs font-black">تطبيق</button>
+                    </div>
+                    <div class="px-6 py-3 flex justify-between items-center bg-slate-50/50 border-b text-[10px] text-slate-500 font-bold">
+                        <span id="shipments-page-meta"></span>
+                        <div class="flex gap-2">
+                            <button type="button" onclick="browseShipments(Math.max(1, shipPager.page - 1))" class="px-3 py-1 rounded-lg bg-white border border-slate-200 font-bold">السابق</button>
+                            <button type="button" onclick="browseShipments(shipPager.page + 1)" class="px-3 py-1 rounded-lg bg-white border border-slate-200 font-bold">التالي</button>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-right">
+                            <thead><tr class="bg-slate-100 text-[10px] font-black uppercase text-slate-500">
+                                <th class="p-4">رقم الشحنة</th><th class="p-4">الشاحن</th><th class="p-4">السائق</th><th class="p-4">الحالة</th><th class="p-4">السعر</th>
+                            </tr></thead>
+                            <tbody id="all-shipments-body"></tbody>
+                        </table>
+                    </div>
+                 </div>
+            </div>
+
+            <div id="settings-section" class="section-content hidden">
+                <div class="card p-10 max-w-3xl">
+                    <h3 class="font-black text-2xl text-slate-800">الإعدادات</h3>
+                    <p class="text-sm text-slate-500 mt-3 leading-relaxed">حدود الأسعار والتصدير متاحة عبر مسارات API الحالية (<code class="bg-slate-100 px-2 py-0.5 rounded text-xs">GET/POST /api/admin/price-floors</code>، <code class="bg-slate-100 px-2 py-0.5 rounded text-xs">GET /api/admin/export-report</code>). تأكد من تشغيل ملف <code class="bg-slate-100 px-2 py-0.5 rounded text-xs">migrations_06_admin_dashboard.sql</code> لتفعيل التظلمات وتعطيل الحسابات وقراءة الإشعارات.</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Document Preview Modal -->
+    <div id="previewModal" class="modal">
+        <div class="modal-content shadow-2xl">
+            <div class="bg-slate-900 text-white p-6 flex justify-between items-center">
+                <div class="flex items-center gap-4">
+                    <div class="w-10 h-10 bg-primary rounded-xl flex items-center justify-center"><i class="fas fa-file-invoice"></i></div>
+                    <div>
+                        <h3 class="font-bold">فحص المستندات</h3>
+                        <p class="text-[10px] text-slate-400">تأكد من مطابقة البيانات مع صورة الهوية/الرخصة</p>
+                    </div>
+                </div>
+                <button onclick="closeModal()" class="w-10 h-10 hover:bg-white/10 rounded-xl transition-colors text-xl">&times;</button>
+            </div>
+            <div id="previewContainer" class="flex-1 bg-slate-200 overflow-auto flex items-center justify-center p-10 min-h-[500px]">
+                <!-- المحتوى يظهر هنا -->
+            </div>
+            <div class="p-6 bg-white border-t flex justify-between items-center">
+                <div class="text-xs text-slate-400 font-bold">الموقع الجغرافي للرفع: <span class="text-slate-600">الرياض، السعودية</span></div>
+                <div class="flex gap-4">
+                    <button onclick="closeModal()" class="px-8 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 transition">إغلاق</button>
+                    <a id="download-link" href="#" target="_blank" class="bg-slate-800 text-white px-8 py-3 rounded-xl font-bold hover:bg-slate-700 transition flex items-center gap-2">
+                        <i class="fas fa-external-link-alt text-xs"></i> فتح في نافذة جديدة
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- User detail modal -->
+    <div id="user-detail-modal" class="modal">
+        <div class="modal-content max-w-lg">
+            <div class="bg-slate-900 text-white p-6 flex justify-between items-center">
+                <h3 class="font-black flex items-center gap-2"><i class="fas fa-id-card text-primary"></i> تفاصيل المستخدم</h3>
+                <button type="button" onclick="closeUserDetail()" class="w-10 h-10 hover:bg-white/10 rounded-xl text-xl">&times;</button>
+            </div>
+            <div id="user-detail-body" class="p-8 text-right text-sm space-y-3 max-h-[70vh] overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = window.location.origin + '/api';
+        let token = localStorage.getItem('darbak_admin_token');
+
+        let activityFeedOffset = 0;
+        let pendingPager = { page: 1, limit: 8 };
+        let usersPager = { page: 1, limit: 15 };
+        let shipPager = { page: 1, limit: 20 };
+        let disputesPager = { page: 1, limit: 12 };
+        let usersRoleTab = '';
+
+        function authHeaders(json = false) {
+            const h = { Authorization: `Bearer ${token}` };
+            if (json) h['Content-Type'] = 'application/json';
+            return h;
+        }
+
+        function esc(s) {
+            return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+        }
+
+        /** أرقام إنجليزية 0123… في لوحة التحكم */
+        function numsEn(n) {
+            if (n === null || n === undefined || n === '—') return String(n ?? '');
+            const x = Number(n);
+            if (!Number.isFinite(x)) return String(n);
+            return x.toLocaleString('en-US', { maximumFractionDigits: 0 });
+        }
+
+        function numsEnMoney(n) {
+            const x = Number(n);
+            if (!Number.isFinite(x)) return '0';
+            return x.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+        }
+
+        const localeArLatinDigits = 'ar-SA-u-nu-latn';
+
+        document.addEventListener('DOMContentLoaded', () => {
+            if (token) {
+                document.getElementById('login-screen').classList.add('hidden');
+                initDashboard();
+            }
+
+            document.getElementById('login-form').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const identifier = document.getElementById('identifier').value;
+                const password = document.getElementById('password').value;
+                const errorEl = document.getElementById('login-error');
+
+                try {
+                    console.log('Attempting login to:', `${API_URL}/auth/login`);
+                    const res = await fetch(`${API_URL}/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ identifier, password })
+                    });
+                    const data = await res.json();
+
+                    if (data.success) {
+                        if (data.user.role !== 'admin') {
+                            errorEl.innerText = 'عذراً، هذا الحساب لا يملك صلاحيات مدير';
+                            errorEl.classList.remove('hidden');
+                            return;
+                        }
+                        token = data.token;
+                        localStorage.setItem('darbak_admin_token', token);
+                        document.getElementById('login-screen').classList.add('hidden');
+                        initDashboard();
+                    } else {
+                        errorEl.innerText = data.message || 'فشل تسجيل الدخول';
+                        errorEl.classList.remove('hidden');
+                    }
+                } catch (err) {
+                    console.error('Login error:', err);
+                    errorEl.innerText = 'خطأ في الاتصال بالسيرفر: ' + err.message;
+                    errorEl.classList.remove('hidden');
+                }
+            });
+
+            document.getElementById('logout-btn').addEventListener('click', () => {
+                localStorage.removeItem('darbak_admin_token');
+                window.location.reload();
+            });
+
+            document.getElementById('current-date').innerText = new Date().toLocaleDateString(localeArLatinDigits, {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+            });
+
+            document.addEventListener('click', (e) => {
+                const panel = document.getElementById('notif-panel');
+                const toggle = document.getElementById('notif-toggle');
+                if (panel && toggle && !panel.classList.contains('hidden')
+                    && !panel.contains(e.target) && !toggle.contains(e.target)) {
+                    panel.classList.add('hidden');
+                }
+            });
+
+            let usersSearchTimer;
+            const usersSearchEl = document.getElementById('users-search');
+            if (usersSearchEl) {
+                usersSearchEl.addEventListener('input', () => {
+                    clearTimeout(usersSearchTimer);
+                    usersSearchTimer = setTimeout(() => browseUsers(1), 450);
+                });
+            }
+        });
+
+        function setUserRoleTab(role) {
+            usersRoleTab = role;
+            document.querySelectorAll('.user-role-tab').forEach((b) => {
+                b.classList.remove('bg-primary', 'text-white');
+                b.classList.add('bg-slate-100', 'text-slate-600');
+            });
+            const map = { '': 'tab-users-all', driver: 'tab-users-driver', shipper: 'tab-users-shipper' };
+            const el = document.getElementById(map[role]);
+            if (el) {
+                el.classList.add('bg-primary', 'text-white');
+                el.classList.remove('bg-slate-100', 'text-slate-600');
+            }
+            browseUsers(1);
+        }
+
+        /** نفس ألوان شارات حالات الشحنات */
+        function getUserRoleBadgeClass(role) {
+            if (role === 'driver') return 'bg-sky-100 text-sky-700';
+            if (role === 'shipper') return 'bg-violet-100 text-violet-700';
+            if (role === 'admin') return 'bg-slate-100 text-slate-600';
+            return 'bg-slate-50 text-slate-400';
+        }
+
+        /** مفتاح getStatusStyle لحالة التوثيق */
+        function getUserVerificationStatusKey(verification) {
+            const v = String(verification || '').toLowerCase();
+            if (v === 'pending') return 'bidding';
+            if (v === 'verified') return 'delivered';
+            if (v === 'rejected') return 'cancelled';
+            return 'pending';
+        }
+
+        function getUserVerificationLabel(verification) {
+            const v = String(verification || '').toLowerCase();
+            if (v === 'pending') return 'معلق';
+            if (v === 'verified') return 'موثّق';
+            if (v === 'rejected') return 'مرفوض';
+            return esc(verification || '—');
+        }
+
+        async function browseUsers(page) {
+            const body = document.getElementById('all-users-body');
+            if (!body) return;
+            usersPager.page = Math.max(1, page);
+            body.innerHTML = '<tr><td colspan="6" class="py-16 text-center text-slate-400">جاري التحميل...</td></tr>';
+            try {
+                const params = new URLSearchParams({ page: usersPager.page, limit: usersPager.limit });
+                if (usersRoleTab) params.set('role', usersRoleTab);
+                const q = document.getElementById('users-search')?.value?.trim();
+                const verification = document.getElementById('users-verification')?.value;
+                const activeEl = document.getElementById('users-active');
+                const active = activeEl ? activeEl.value : '';
+                const df = document.getElementById('users-from')?.value;
+                const dt = document.getElementById('users-to')?.value;
+                if (q) params.set('q', q);
+                if (verification) params.set('verification', verification);
+                if (active !== '' && active !== undefined) params.set('active', active);
+                if (df) params.set('dateFrom', df);
+                if (dt) params.set('dateTo', dt);
+
+                const res = await fetch(`${API_URL}/admin/users/browse?${params}`, { headers: authHeaders() });
+                const data = await res.json();
+                const meta = document.getElementById('users-page-meta');
+                if (meta && data.pagination) {
+                    meta.innerText = `صفحة ${numsEn(data.pagination.page)} من ${numsEn(data.pagination.totalPages)} — ${numsEn(data.pagination.total)} مستخدم`;
+                }
+                if (!data.success) {
+                    body.innerHTML = `<tr><td colspan="6" class="py-16 text-center text-rose-500">${esc(data.message || 'خطأ')}</td></tr>`;
+                    return;
+                }
+                if (!data.data?.length) {
+                    body.innerHTML = '<tr><td colspan="6" class="py-16 text-center text-slate-300 italic">لا توجد نتائج</td></tr>';
+                    return;
+                }
+                const ub =
+                    'inline-flex items-center justify-center px-3 py-1.5 rounded-lg text-[10px] font-black transition';
+                body.innerHTML = data.data.map((u) => {
+                    const roleLabel = u.role === 'driver' ? 'سائق' : u.role === 'shipper' ? 'شركة نقل' : 'مدير';
+                    const activeOk = u.is_active === undefined || u.is_active === 1 || u.is_active === true;
+                    const verKey = getUserVerificationStatusKey(u.verification_status);
+                    const verStyle = getStatusStyle(verKey);
+                    const verLabel = getUserVerificationLabel(u.verification_status);
+                    const accountStyle = activeOk ? getStatusStyle('delivered') : getStatusStyle('cancelled');
+                    const accountLabel = activeOk ? 'مفعّل' : 'معطّل';
+                    const roleClass = getUserRoleBadgeClass(u.role);
+                    const verifyBtn =
+                        u.role === 'driver'
+                            ? `<button type="button" onclick="verifyUserQuick(${u.id})" class="${ub} bg-primary text-white hover:brightness-110 shadow-sm shadow-primary/20">توثيق</button>`
+                            : '';
+                    const toggleBtn =
+                        u.role !== 'admin'
+                            ? `<button type="button" onclick="toggleUserActive(${u.id}, ${activeOk ? '\'true\'' : '\'false\''})" class="${ub} bg-white border border-slate-200 text-slate-700 hover:border-primary hover:text-primary">${activeOk ? 'تعطيل' : 'تفعيل'}</button>`
+                            : '';
+                    return `
+                        <tr class="border-b border-slate-50 hover:bg-slate-50">
+                            <td class="p-4">
+                                <div class="text-xs font-black text-slate-800">${esc(u.full_name)}</div>
+                                <div class="text-[10px] text-slate-500 mt-0.5">${esc(u.email || '—')} · ${esc(u.phone)}</div>
+                            </td>
+                            <td class="p-4">
+                                <span class="px-3 py-1 rounded-full text-[9px] font-black uppercase ${roleClass}">${roleLabel}</span>
+                            </td>
+                            <td class="p-4">
+                                <span class="px-3 py-1 rounded-full text-[9px] font-black uppercase ${verStyle}">${verLabel}</span>
+                            </td>
+                            <td class="p-4">
+                                <span class="px-3 py-1 rounded-full text-[9px] font-black uppercase ${accountStyle}">${accountLabel}</span>
+                            </td>
+                            <td class="p-4 text-xs text-slate-600">${new Date(u.created_at).toLocaleDateString(localeArLatinDigits)}</td>
+                            <td class="p-4 text-left">
+                                <div class="flex flex-wrap items-center justify-end gap-2">
+                                    <button type="button" onclick="openUserDetail(${u.id})" class="${ub} bg-slate-800 text-white hover:bg-slate-900">تفاصيل</button>
+                                    ${verifyBtn}
+                                    ${toggleBtn}
+                                </div>
+                            </td>
+                        </tr>`;
+                }).join('');
+            } catch (e) {
+                body.innerHTML = '<tr><td colspan="6" class="py-16 text-center text-rose-500">فشل الاتصال</td></tr>';
+            }
+        }
+
+        async function browseShipments(page) {
+            const body = document.getElementById('all-shipments-body');
+            if (!body) return;
+            shipPager.page = Math.max(1, page);
+            body.innerHTML = '<tr><td colspan="5" class="py-16 text-center text-slate-400">جاري التحميل...</td></tr>';
+            try {
+                const params = new URLSearchParams({ page: shipPager.page, limit: shipPager.limit });
+                const q = document.getElementById('shipments-search')?.value?.trim();
+                const status = document.getElementById('shipments-status')?.value;
+                const df = document.getElementById('shipments-from')?.value;
+                const dt = document.getElementById('shipments-to')?.value;
+                if (q) params.set('q', q);
+                if (status) params.set('status', status);
+                if (df) params.set('dateFrom', df);
+                if (dt) params.set('dateTo', dt);
+
+                const res = await fetch(`${API_URL}/admin/shipments/browse?${params}`, { headers: authHeaders() });
+                const data = await res.json();
+                const meta = document.getElementById('shipments-page-meta');
+                if (meta && data.pagination) {
+                    meta.innerText = `صفحة ${numsEn(data.pagination.page)} من ${numsEn(data.pagination.totalPages)} — ${numsEn(data.pagination.total)} شحنة`;
+                }
+                if (!data.success || !data.data?.length) {
+                    body.innerHTML = '<tr><td colspan="5" class="py-16 text-center text-slate-300 italic">لا توجد شحنات</td></tr>';
+                    return;
+                }
+                body.innerHTML = data.data.map((s) => `
+                    <tr class="border-b border-slate-50 hover:bg-slate-50">
+                        <td class="p-4 font-bold text-slate-600">#${numsEn(s.id)}</td>
+                        <td class="p-4 text-xs font-bold">${esc(s.shipper_name || '—')}</td>
+                        <td class="p-4 text-xs text-slate-600">${esc(s.driver_name || '—')}</td>
+                        <td class="p-4"><span class="px-3 py-1 rounded-full text-[9px] font-black uppercase ${getStatusStyle(s.status)}">${esc(s.status)}</span></td>
+                        <td class="p-4 font-black text-primary">${numsEnMoney(s.final_price || s.base_price || 0)} ريال</td>
+                    </tr>`).join('');
+            } catch (e) {
+                body.innerHTML = '<tr><td colspan="5" class="py-16 text-center text-rose-500">فشل الاتصال</td></tr>';
+            }
+        }
+
+        async function openUserDetail(id) {
+            const modal = document.getElementById('user-detail-modal');
+            const wrap = document.getElementById('user-detail-body');
+            wrap.innerHTML = '<div class="flex justify-center py-10"><div class="animate-spin h-10 w-10 border-2 border-primary border-t-transparent rounded-full"></div></div>';
+            modal.style.display = 'block';
+            try {
+                const res = await fetch(`${API_URL}/admin/users/${id}/detail`, { headers: authHeaders() });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.message);
+                const u = data.data;
+                const trucks = (u.trucks || []).map((t) => `<li class="text-xs border-b border-slate-100 py-2">${esc(t.plate_number)} · ${esc(t.truck_type || '')} · ${esc(t.verification_status)}</li>`).join('');
+                const inactiveNote = u.is_active === 0 ? ' · معطّل' : '';
+                wrap.innerHTML = `
+                    <div><span class="text-slate-400 text-[10px] font-bold">الاسم</span><div class="font-black">${esc(u.full_name)}</div></div>
+                    <div><span class="text-slate-400 text-[10px] font-bold">التواصل</span><div>${esc(u.email || '—')} · ${esc(u.phone)}</div></div>
+                    <div><span class="text-slate-400 text-[10px] font-bold">الدور</span><div>${esc(u.role)}</div></div>
+                    <div><span class="text-slate-400 text-[10px] font-bold">التوثيق</span><div>${esc(u.verification_status)}${inactiveNote}</div></div>
+                    ${u.role === 'driver' ? `<div><span class="text-slate-400 text-[10px] font-bold">المركبات</span><ul class="mt-2 pr-4">${trucks || '<li class="text-xs text-slate-400">لا توجد بيانات</li>'}</ul></div>` : ''}`;
+            } catch (e) {
+                wrap.innerHTML = `<p class="text-rose-600 font-bold text-center">${esc(e.message || 'خطأ')}</p>`;
+            }
+        }
+
+        function closeUserDetail() {
+            document.getElementById('user-detail-modal').style.display = 'none';
+        }
+
+        async function verifyUserQuick(id) {
+            if (!confirm('توثيق هذا السائق؟')) return;
+            try {
+                const res = await fetch(`${API_URL}/admin/users/${id}/verify`, {
+                    method: 'POST',
+                    headers: authHeaders(true),
+                    body: JSON.stringify({}),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data.success !== false) {
+                    browseUsers(usersPager.page);
+                    refreshData();
+                } else alert(data.message || 'فشل');
+            } catch (e) {
+                alert('خطأ في الاتصال');
+            }
+        }
+
+        async function toggleUserActive(id, currentlyActiveStr) {
+            const currentlyActive = currentlyActiveStr === 'true';
+            const next = !currentlyActive;
+            if (!confirm(next ? 'تفعيل الحساب؟' : 'تعطيل الحساب؟')) return;
+            try {
+                const res = await fetch(`${API_URL}/admin/users/${id}/active`, {
+                    method: 'PATCH',
+                    headers: authHeaders(true),
+                    body: JSON.stringify({ is_active: next }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.ok && data.success) {
+                    browseUsers(usersPager.page);
+                    refreshData();
+                } else alert(data.message || 'تأكد من تشغيل migration لعمود is_active');
+            } catch (e) {
+                alert('خطأ في الاتصال');
+            }
+        }
+
+        function showSection(sectionId) {
+            document.querySelectorAll('.section-content').forEach((s) => s.classList.add('hidden'));
+            document.getElementById(`${sectionId}-section`).classList.remove('hidden');
+            document.querySelectorAll('.nav-link').forEach((l) => l.classList.remove('active'));
+            const nav = document.getElementById(`nav-${sectionId}`);
+            if (nav) nav.classList.add('active');
+
+            const titles = {
+                dashboard: 'نظرة عامة',
+                users: 'إدارة المستخدمين',
+                shipments: 'متابعة الشحنات',
+                financials: 'المالية والجزاءات',
+                settings: 'الإعدادات',
+            };
+            document.getElementById('section-title').innerText = titles[sectionId] || '';
+
+            if (sectionId === 'users') browseUsers(1);
+            if (sectionId === 'shipments') browseShipments(1);
+            if (sectionId === 'financials') {
+                loadDisputes(1);
+                refreshOpenDisputesBanner();
+            }
+        }
+
+        async function refreshOpenDisputesBanner() {
+            try {
+                const res = await fetch(`${API_URL}/admin/disputes?status=open&limit=1&page=1`, { headers: authHeaders() });
+                const data = await res.json();
+                const el = document.getElementById('pending-disputes-count');
+                if (el && data.pagination) el.innerText = numsEn(data.pagination.total);
+            } catch (_) {}
+        }
+
+        async function loadDisputes(page = 1) {
+            disputesPager.page = Math.max(1, page);
+            const body = document.getElementById('disputes-body');
+            if (!body) return;
+            body.innerHTML = '<tr><td colspan="6" class="py-20 text-center"><div class="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent mx-auto"></div></td></tr>';
+
+            try {
+                const params = new URLSearchParams({ page: disputesPager.page, limit: disputesPager.limit });
+                const search = document.getElementById('disputes-search')?.value?.trim();
+                const status = document.getElementById('disputes-status')?.value;
+                if (search) params.set('q', search);
+                if (status) params.set('status', status);
+
+                const res = await fetch(`${API_URL}/admin/disputes?${params}`, { headers: authHeaders() });
+                const data = await res.json();
+                const meta = document.getElementById('disputes-page-meta');
+                if (meta && data.pagination) {
+                    meta.innerText = `صفحة ${numsEn(data.pagination.page)} من ${numsEn(data.pagination.totalPages)} — ${numsEn(data.pagination.total)} سجل`;
+                }
+                refreshOpenDisputesBanner();
+
+                if (!data.success || !data.data?.length) {
+                    body.innerHTML = '<tr><td colspan="6" class="py-20 text-center text-slate-300 italic">لا توجد تظلمات مطابقة</td></tr>';
+                    return;
+                }
+                body.innerHTML = data.data.map((d) => {
+                    const rid = d.transaction_id || d.id;
+                    const canAct = d.status === 'open';
+                    const btns = canAct
+                        ? `<button type="button" onclick="resolveDispute(${rid}, 'approved')" class="bg-emerald-500 text-white px-4 py-2 rounded-lg text-[10px] font-bold">قبول</button>
+                           <button type="button" onclick="resolveDispute(${rid}, 'rejected')" class="bg-slate-200 text-slate-600 px-4 py-2 rounded-lg text-[10px] font-bold">رفض</button>`
+                        : `<span class="text-[10px] font-bold text-slate-400">${esc(d.status)}</span>`;
+                    return `
+                        <tr class="hover:bg-slate-50 transition-colors border-b border-slate-50">
+                            <td class="p-6"><div class="font-black text-slate-800">${esc(d.driver_name)}</div><div class="text-[10px] text-slate-400">شحنة #${numsEn(d.shipment_id)}</div></td>
+                            <td class="p-6"><span class="px-2 py-1 rounded bg-rose-50 text-rose-600 text-[10px] font-bold">تظلم مالي</span></td>
+                            <td class="p-6 font-black text-rose-600">${numsEnMoney(Math.abs(Number(d.amount || 0)))} ريال</td>
+                            <td class="p-6"><div class="text-xs text-slate-600 max-w-xs truncate" title="${esc(d.dispute_reason)}">${esc(d.dispute_reason || '')}</div></td>
+                            <td class="p-6 text-[10px] text-slate-400">${new Date(d.created_at).toLocaleDateString(localeArLatinDigits)}</td>
+                            <td class="p-6 text-left flex gap-2 justify-end">${btns}</td>
+                        </tr>`;
+                }).join('');
+            } catch (e) {
+                body.innerHTML = '<tr><td colspan="6" class="py-20 text-center text-rose-500 font-bold">فشل جلب البيانات</td></tr>';
+            }
+        }
+
+        function disputesPrev() {
+            if (disputesPager.page > 1) loadDisputes(disputesPager.page - 1);
+        }
+        function disputesNext() {
+            loadDisputes(disputesPager.page + 1);
+        }
+
+        async function resolveDispute(transactionId, status) {
+            if (!confirm(`هل أنت متأكد من ${status === 'approved' ? 'قبول' : 'رفض'} هذا التظلم؟`)) return;
+
+            try {
+                const res = await fetch(`${API_URL}/admin/disputes/resolve`, {
+                    method: 'POST',
+                    headers: authHeaders(true),
+                    body: JSON.stringify({ transactionId, status }),
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('تم تنفيذ الإجراء بنجاح');
+                    loadDisputes(disputesPager.page);
+                    refreshData();
+                } else alert('خطأ: ' + (data.message || ''));
+            } catch (e) {
+                alert('خطأ في الاتصال بالسيرفر');
+            }
+        }
+
+        async function initDashboard() {
+            refreshData();
+            loadNotifications();
+            setInterval(refreshData, 15000);
+            setInterval(loadNotifications, 30000);
+        }
+
+        async function refreshData() {
+            if (!token) return;
+            try {
+                const res = await fetch(`${API_URL}/admin/stats`, { headers: authHeaders() });
+                const data = await res.json();
+                if (!data.success) return;
+                const s = data.data;
+                const sum = s.summary || {};
+
+                document.getElementById('total-users').innerText = numsEn(
+                    sum.totalUsers ?? (s.userStats || []).reduce((a, b) => a + b.total, 0)
+                );
+                document.getElementById('stat-drivers').innerText =
+                    sum.driversCount !== undefined && sum.driversCount !== null ? numsEn(sum.driversCount) : '—';
+                document.getElementById('stat-companies').innerText =
+                    sum.companiesCount !== undefined && sum.companiesCount !== null ? numsEn(sum.companiesCount) : '—';
+                document.getElementById('active-shipments').innerText = numsEn(
+                    sum.activeTrips ??
+                        (s.shipmentStats || [])
+                            .filter((x) => ['assigned', 'at_pickup', 'en_route', 'at_dropoff'].includes(x.status))
+                            .reduce((a, b) => a + b.total, 0)
+                );
+                document.getElementById('completed-trips-stat').innerText = numsEn(
+                    sum.completedTrips ?? (s.shipmentStats || []).find((x) => x.status === 'delivered')?.total ?? 0
+                );
+                document.getElementById('pending-count-stat').innerText = numsEn(
+                    sum.pendingVerifications ?? s.pendingUsersCount ?? 0
+                );
+                document.getElementById('revenue-stat').innerText = `${numsEnMoney(sum.totalRevenue || 0)} ريال`;
+                document.getElementById('open-disputes-stat').innerText = numsEn(sum.openDisputes ?? 0);
+                document.getElementById('active-bids').innerText = numsEn(
+                    sum.pendingBidsCount ?? (s.shipmentStats || []).find((x) => x.status === 'bidding')?.total ?? 0
+                );
+
+                activityFeedOffset = (s.activities || []).length;
+                updateActivityFeed(s.activities || [], true);
+
+                loadPendingUsers();
+                updateRecentShipments(s.recentShipments);
+
+                const pendBadge = document.getElementById('pending-badge');
+                const pendN = sum.pendingVerifications ?? s.pendingUsersCount ?? 0;
+                if (pendBadge) pendBadge.style.display = pendN > 0 ? '' : 'none';
+            } catch (e) {
+                console.error('Refresh Failed', e);
+            }
+        }
+
+        function activityIcon(type) {
+            const map = {
+                registration: ['fa-user-plus', 'bg-emerald-500'],
+                bid_submitted: ['fa-hand-holding-dollar', 'bg-amber-500'],
+                bid_accepted: ['fa-circle-check', 'bg-teal-500'],
+                bid_rejected: ['fa-ban', 'bg-rose-500'],
+                trip_completed: ['fa-flag-checkered', 'bg-indigo-500'],
+                rating_submitted: ['fa-star', 'bg-yellow-500'],
+                document: ['fa-file-arrow-up', 'bg-blue-500'],
+                verification_decided: ['fa-stamp', 'bg-violet-500'],
+                dispute_opened: ['fa-gavel', 'bg-orange-500'],
+                ship: ['fa-truck-fast', 'bg-blue-500'],
+                bid: ['fa-hand-holding-dollar', 'bg-amber-500'],
+                user: ['fa-user-plus', 'bg-emerald-500'],
+            };
+            return map[type] || ['fa-circle', 'bg-slate-400'];
+        }
+
+        function renderActivityRow(a) {
+            const [icon, color] = activityIcon(a.type);
+            const t = a.activity_date || a.created_at;
+            return `
+                <div class="activity-item flex gap-3 w-full shrink-0 p-4 rounded-2xl border border-slate-100 bg-gradient-to-l from-white to-slate-50/90 shadow-sm text-right">
+                    <div class="w-11 h-11 rounded-xl ${color} text-white flex items-center justify-center shadow-md shrink-0">
+                        <i class="fas ${icon} text-sm"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center justify-between gap-2 mb-1">
+                            <span class="text-[9px] font-bold text-slate-400 whitespace-nowrap">${new Date(t).toLocaleString(localeArLatinDigits, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                        <h5 class="text-[11px] font-black text-slate-800 leading-snug">${esc(a.actor)}</h5>
+                        <p class="text-[10px] text-slate-500 leading-relaxed mt-1">${esc(a.detail)}</p>
+                    </div>
+                </div>`;
+        }
+
+        function updateActivityFeed(activities, reset) {
+            const feed = document.getElementById('activity-feed');
+            if (!feed) return;
+            if (!activities?.length && reset) {
+                feed.innerHTML = '<div class="flex justify-center items-center py-16 text-slate-300 text-sm font-bold">لا توجد أنشطة حديثة</div>';
+                return;
+            }
+            const html = activities.map(renderActivityRow).join('');
+            if (reset) feed.innerHTML = html;
+            else feed.insertAdjacentHTML('beforeend', html);
+        }
+
+        async function loadMoreActivity() {
+            try {
+                const res = await fetch(`${API_URL}/admin/activity-feed?limit=25&offset=${activityFeedOffset}`, { headers: authHeaders() });
+                const data = await res.json();
+                if (!data.success || !data.data?.length) {
+                    alert('لا يوجد المزيد حالياً');
+                    return;
+                }
+                activityFeedOffset += data.data.length;
+                updateActivityFeed(data.data, false);
+            } catch (e) {
+                alert('فشل التحميل');
+            }
+        }
+
+        async function loadNotifications() {
+            if (!token) return;
+            try {
+                const res = await fetch(`${API_URL}/admin/notifications?limit=40`, { headers: authHeaders() });
+                const data = await res.json();
+                if (!data.success) return;
+                const unc = data.data.unreadCount || 0;
+                const badge = document.getElementById('notif-badge');
+                if (badge) {
+                    badge.innerText = unc > 99 ? '99+' : numsEn(unc);
+                    badge.classList.toggle('hidden', unc === 0);
+                }
+                const list = document.getElementById('notif-list');
+                if (!list) return;
+                const items = data.data.items || [];
+                if (!items.length) {
+                    list.innerHTML = '<div class="p-8 text-center text-slate-400 text-xs">لا توجد إشعارات</div>';
+                    return;
+                }
+                list.innerHTML = items.map((n) => `
+                    <button type="button" onclick="markOneNotifRead(${JSON.stringify(n.key)})" class="w-full text-right p-4 hover:bg-slate-50 transition ${n.read ? 'opacity-60' : 'bg-emerald-50/40'}">
+                        <div class="flex justify-between gap-2 items-start">
+                            <span class="text-[11px] font-black text-slate-800">${esc(n.title)}</span>
+                            <span class="text-[9px] text-slate-400 whitespace-nowrap">${new Date(n.created_at).toLocaleString(localeArLatinDigits)}</span>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-1 leading-relaxed">${esc(n.body)}</p>
+                    </button>`).join('');
+            } catch (_) {}
+        }
+
+        function toggleNotifPanel() {
+            const panel = document.getElementById('notif-panel');
+            panel.classList.toggle('hidden');
+            if (!panel.classList.contains('hidden')) loadNotifications();
+        }
+
+        async function markOneNotifRead(key) {
+            try {
+                await fetch(`${API_URL}/admin/notifications/read`, {
+                    method: 'POST',
+                    headers: authHeaders(true),
+                    body: JSON.stringify({ key }),
+                });
+                loadNotifications();
+            } catch (_) {}
+        }
+
+        async function markAllNotifsRead() {
+            try {
+                const res = await fetch(`${API_URL}/admin/notifications?limit=80`, { headers: authHeaders() });
+                const data = await res.json();
+                const keys = (data.data.items || []).filter((i) => !i.read).map((i) => i.key);
+                if (!keys.length) return;
+                await fetch(`${API_URL}/admin/notifications/read`, {
+                    method: 'POST',
+                    headers: authHeaders(true),
+                    body: JSON.stringify({ keys }),
+                });
+                loadNotifications();
+            } catch (_) {}
+        }
+
+        function pendingUsersPrev() {
+            if (pendingPager.page > 1) {
+                pendingPager.page--;
+                loadPendingUsers();
+            }
+        }
+        function pendingUsersNext() {
+            pendingPager.page++;
+            loadPendingUsers();
+        }
+
+        function updateRecentShipments(shipments) {
+            const body = document.getElementById('recent-shipments-body');
+            if (!shipments?.length) return;
+
+            body.innerHTML = shipments.map((s) => `
+                <tr class="hover:bg-slate-50/80 transition-all border-b border-slate-50 last:border-0">
+                    <td class="p-6">
+                        <div class="flex items-center gap-4">
+                            <div class="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center text-slate-400 font-bold text-xs uppercase">${s.id.toString().slice(-3)}</div>
+                            <div>
+                                <p class="text-xs font-black text-slate-800">${esc(s.shipper)}</p>
+                                <p class="text-[9px] text-slate-400 mt-1">${esc(String(s.pickup_address || '').split(',')[0])} &rarr; ${esc(String(s.dropoff_address || '').split(',')[0])}</p>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="p-6 text-center">
+                        <span class="px-3 py-1 rounded-full text-[9px] font-black uppercase ${getStatusStyle(s.status)}">${esc(s.status)}</span>
+                    </td>
+                    <td class="p-6 text-left font-black text-primary text-sm">${numsEnMoney(s.final_price || s.base_price || 0)} ريال</td>
+                </tr>
+            `).join('');
+        }
+
+        async function loadPendingUsers() {
+            try {
+                const qs = new URLSearchParams({ page: pendingPager.page, limit: pendingPager.limit });
+                const res = await fetch(`${API_URL}/admin/pending-users?${qs}`, { headers: authHeaders() });
+                const data = await res.json();
+                const body = document.getElementById('pending-users-body');
+                const meta = document.getElementById('pending-users-meta');
+                if (meta && data.pagination) {
+                    meta.innerText = `صفحة ${numsEn(data.pagination.page)} من ${numsEn(data.pagination.totalPages)} — ${numsEn(data.pagination.total)} طلب`;
+                } else if (meta) meta.innerText = '';
+
+                const docLabel = (dt) => {
+                    if (dt === 'commercial_registration') return 'السجل التجاري';
+                    if (dt === 'driver_license') return 'رخصة السائق';
+                    return dt || 'مستند';
+                };
+
+                if (data.success && data.data.length > 0) {
+                    body.innerHTML = data.data.map((u) => `
+                        <tr class="hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0">
+                            <td class="px-8 py-5">
+                                <div class="font-black text-slate-800">${esc(u.full_name)}</div>
+                                <div class="text-[10px] text-slate-400">${esc(u.phone)}</div>
+                            </td>
+                            <td class="px-4 py-5">
+                                <span class="text-[9px] font-bold px-3 py-1 rounded-lg ${u.role === 'driver' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'} border border-current opacity-70">${u.role === 'driver' ? 'سائق' : 'شاحن'}</span>
+                            </td>
+                            <td class="px-4 py-5">
+                                <button type="button" onclick="previewDoc(${u.document_id}, ${JSON.stringify(u.document_url)}, ${JSON.stringify(u.document_type)})" class="text-primary font-black text-[10px] hover:underline flex items-center gap-2">
+                                    <i class="fas fa-file-pdf"></i> عرض ${docLabel(u.document_type)}
+                                </button>
+                            </td>
+                            <td class="px-8 py-5 text-left flex gap-3 justify-end">
+                                <button type="button" onclick="verifyDoc(${u.document_id}, 'verified')" class="w-9 h-9 bg-emerald-500 text-white rounded-xl hover:bg-emerald-600 transition shadow-lg shadow-emerald-100 flex items-center justify-center"><i class="fas fa-check"></i></button>
+                                <button type="button" onclick="verifyDoc(${u.document_id}, 'rejected')" class="w-9 h-9 bg-rose-500 text-white rounded-xl hover:bg-rose-600 transition shadow-lg shadow-rose-100 flex items-center justify-center"><i class="fas fa-times text-xs"></i></button>
+                            </td>
+                        </tr>
+                    `).join('');
+                } else {
+                    body.innerHTML = '<tr><td colspan="4" class="py-20 text-center text-slate-300 italic">لا توجد طلبات معلقة حالياً</td></tr>';
+                }
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        /** pdf | image | other — الامتداد أولاً (يعالج application/octet-stream من الجوال) */
+        function detectPreviewKind(pathOrUrl, contentType) {
+            const path = String(pathOrUrl || '')
+                .toLowerCase()
+                .split('?')[0]
+                .split('#')[0];
+            const ct = String(contentType || '').toLowerCase().split(';')[0].trim();
+            const ext = (path.match(/\.(pdf|jpe?g|png|gif|webp|bmp|svg|heic|heif)$/) || [])[1] || '';
+            if (ext === 'pdf') return 'pdf';
+            if (ext && ext !== 'pdf') return 'image';
+            if (ct === 'application/pdf' || ct.includes('pdf')) return 'pdf';
+            if (ct.startsWith('image/')) return 'image';
+            return 'other';
+        }
+
+        function sniffPreviewFromBytes(u8) {
+            if (!u8 || u8.length < 12) return null;
+            if (u8[0] === 0x25 && u8[1] === 0x50 && u8[2] === 0x44 && u8[3] === 0x46) return { kind: 'pdf', mime: 'application/pdf' };
+            if (u8[0] === 0xff && u8[1] === 0xd8 && u8[2] === 0xff) return { kind: 'image', mime: 'image/jpeg' };
+            if (u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4e && u8[3] === 0x47) return { kind: 'image', mime: 'image/png' };
+            const g = String.fromCharCode(u8[0], u8[1], u8[2], u8[3], u8[4], u8[5]);
+            if (g.startsWith('GIF87') || g.startsWith('GIF89')) return { kind: 'image', mime: 'image/gif' };
+            if (u8[0] === 0x52 && u8[1] === 0x49 && u8[2] === 0x46 && u8[3] === 0x46) {
+                if (u8.length >= 12 && String.fromCharCode(u8[8], u8[9], u8[10], u8[11]) === 'WEBP') return { kind: 'image', mime: 'image/webp' };
+            }
+            return null;
+        }
+
+        async function normalizePreviewBlob(blob, pathHint, contentTypeHeader, hdrKind) {
+            const ab = await blob.arrayBuffer();
+            const u8 = new Uint8Array(ab.slice(0, 32));
+            const sniffed = sniffPreviewFromBytes(u8);
+            let kind =
+                hdrKind === 'pdf' || hdrKind === 'image' || hdrKind === 'other'
+                    ? hdrKind
+                    : null;
+            if (sniffed) kind = sniffed.kind;
+            if (!kind || kind === 'other') kind = detectPreviewKind(pathHint, contentTypeHeader || blob.type || '');
+            if (sniffed && (kind === 'pdf' || kind === 'image')) {
+                return { kind, blob: new Blob([ab], { type: sniffed.mime }) };
+            }
+            if ((kind === 'pdf' || kind === 'image') && (!blob.type || blob.type === 'application/octet-stream')) {
+                const ct0 = String(contentTypeHeader || '').toLowerCase().split(';')[0].trim();
+                const mime =
+                    kind === 'pdf'
+                        ? 'application/pdf'
+                        : ct0.startsWith('image/')
+                          ? ct0
+                          : 'image/jpeg';
+                return { kind, blob: new Blob([ab], { type: mime }) };
+            }
+            return { kind, blob: new Blob([ab], { type: blob.type || 'application/octet-stream' }) };
+        }
+
+        /** معاينة بالشكل القديم: iframe للـ PDF وصورة مباشرة */
+        function renderPreviewInto(container, src, kind) {
+            const srcJson = JSON.stringify(src);
+            if (kind === 'pdf') {
+                container.innerHTML = `<iframe src=${srcJson} class="w-full h-[600px] rounded-2xl border-0 shadow-xl bg-white" title="معاينة PDF"></iframe>`;
+                return;
+            }
+            if (kind === 'image') {
+                container.innerHTML = `
+                    <div class="relative group">
+                        <img src=${srcJson} class="max-w-full max-h-[600px] rounded-2xl shadow-2xl border-8 border-white object-contain" alt="معاينة">
+                        <div class="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none rounded-2xl"></div>
+                    </div>`;
+                return;
+            }
+            container.innerHTML = `
+                <div class="text-center p-8 space-y-4">
+                    <p class="text-sm text-slate-600 font-bold">معاينة مباشرة غير متاحة لهذا الامتداد.</p>
+                    <a href=${srcJson} target="_blank" rel="noopener" class="inline-flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-xl text-xs font-black">فتح / تنزيل الملف</a>
+                </div>`;
+        }
+
+        async function previewDoc(a, b, c) {
+            const container = document.getElementById('previewContainer');
+            const downloadBtn = document.getElementById('download-link');
+
+            if (window.__previewBlobUrl) {
+                URL.revokeObjectURL(window.__previewBlobUrl);
+                window.__previewBlobUrl = null;
+            }
+
+            container.innerHTML = '<div class="animate-spin rounded-full h-12 w-12 border-4 border-primary border-t-transparent"></div>';
+            document.getElementById('previewModal').style.display = 'block';
+
+            const isUrlLike = (s) => {
+                const t = String(s || '').trim();
+                return /^https?:\/\//i.test(t) || (t.includes('/') && t.length > 2);
+            };
+            let docId;
+            let url;
+            let type;
+            const bStr = b != null ? String(b) : '';
+            if (
+                (typeof a === 'number' || (typeof a === 'string' && /^\d+$/.test(String(a).trim()))) &&
+                isUrlLike(bStr)
+            ) {
+                docId = a;
+                url = bStr;
+                type = c != null ? String(c) : '';
+            } else {
+                docId = null;
+                url = String(a || '');
+                type = bStr;
+            }
+
+            const idNum = parseInt(String(docId), 10);
+            const hasDocId = Number.isFinite(idNum) && idNum > 0;
+            const pathHint = String(url || '');
+
+            const showSigned = (signedUrl, fileType) => {
+                downloadBtn.href = signedUrl;
+                downloadBtn.removeAttribute('download');
+                const kind =
+                    fileType === 'pdf' ? 'pdf' : fileType === 'image' ? 'image' : detectPreviewKind(signedUrl, '');
+                renderPreviewInto(container, signedUrl, kind);
+            };
+
+            try {
+                /* 1) السلوك القديم: رابط موقّع مباشرة في iframe / img */
+                const signQs = hasDocId
+                    ? `docId=${encodeURIComponent(String(idNum))}`
+                    : `url=${encodeURIComponent(url)}`;
+                const signRes = await fetch(`${API_URL}/admin/get-signed-url?${signQs}`, {
+                    headers: authHeaders(),
+                });
+                const signData = await signRes.json().catch(() => ({}));
+                const su = signData.signedUrl;
+                if (
+                    signRes.ok &&
+                    signData.success &&
+                    su &&
+                    (String(su).startsWith('http://') || String(su).startsWith('https://'))
+                ) {
+                    showSigned(su, signData.fileType || signData.previewKind);
+                    return;
+                }
+
+                /* 2) احتياطي: بث عبر السيرفر ثم blob (يعمل إذا فشل التوقيع أو حظر iframe) */
+                let res = null;
+                if (hasDocId) {
+                    res = await fetch(`${API_URL}/admin/documents/${idNum}/preview`, { headers: authHeaders() });
+                }
+                if (!res || !res.ok) {
+                    res = await fetch(`${API_URL}/admin/documents/preview?url=${encodeURIComponent(url)}`, {
+                        headers: authHeaders(),
+                    });
+                }
+
+                let ct = res.headers.get('content-type') || '';
+                if (res.ok) {
+                    const rawBlob = await res.blob();
+                    const hdrKind = (res.headers.get('x-preview-kind') || '').toLowerCase();
+                    const { kind, blob: previewBlob } = await normalizePreviewBlob(
+                        rawBlob,
+                        pathHint,
+                        ct,
+                        hdrKind
+                    );
+                    const blobUrl = URL.createObjectURL(previewBlob);
+                    window.__previewBlobUrl = blobUrl;
+
+                    const baseName = pathHint.split('/').pop().split('?')[0] || (kind === 'pdf' ? 'document.pdf' : 'document');
+                    downloadBtn.href = blobUrl;
+                    downloadBtn.download = baseName;
+
+                    renderPreviewInto(container, blobUrl, kind);
+                    return;
+                }
+
+                let msg = 'فشل تحميل المستند';
+                try {
+                    if (ct.includes('application/json')) {
+                        const j = await res.json();
+                        msg = j.message || msg;
+                    } else {
+                        const t = await res.text();
+                        if (t) msg = t;
+                    }
+                } catch (_) {}
+
+                throw new Error(signData.message || msg);
+            } catch (e) {
+                container.innerHTML = `<div class="text-center text-rose-500 font-bold px-4"><i class="fas fa-exclamation-triangle text-4xl mb-3"></i><br>${esc(e.message || 'فشل تحميل المستند')}</div>`;
+            }
+        }
+
+        async function verifyDoc(docId, status) {
+            const msg = status === 'verified' ? 'هل أنت متأكد من اعتماد هذا المستند؟' : 'هل تريد رفض هذا المستند؟ سيتم إخطار المستخدم';
+            if (!confirm(msg)) return;
+
+            try {
+                const res = await fetch(`${API_URL}/admin/documents/${docId}/verify`, {
+                    method: 'POST',
+                    headers: authHeaders(true),
+                    body: JSON.stringify({ status })
+                });
+                if (res.ok) refreshData();
+            } catch (e) { alert('خطأ في الاتصال'); }
+        }
+
+        function getStatusStyle(status) {
+            const map = {
+                delivered: 'bg-emerald-100 text-emerald-700',
+                pending: 'bg-slate-100 text-slate-600',
+                bidding: 'bg-amber-100 text-amber-700',
+                assigned: 'bg-sky-100 text-sky-700',
+                at_pickup: 'bg-blue-100 text-blue-700',
+                en_route: 'bg-blue-100 text-blue-700',
+                at_dropoff: 'bg-violet-100 text-violet-700',
+                cancelled: 'bg-rose-100 text-rose-700',
+            };
+            return map[status] || 'bg-slate-50 text-slate-400';
+        }
+
+        function closeModal() {
+            if (window.__previewBlobUrl) {
+                URL.revokeObjectURL(window.__previewBlobUrl);
+                window.__previewBlobUrl = null;
+            }
+            document.getElementById('previewModal').style.display = 'none';
+        }
+    </script>
+</body>
+</html>

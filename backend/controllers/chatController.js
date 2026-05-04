@@ -57,7 +57,22 @@ const sendShipmentMessage = async (req, res) => {
   }
 };
 
+const listMyConversations = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ message: 'غير مصرح' });
+    }
+    const rows = await Message.listConversationSummariesForUser(userId);
+    return res.json(rows);
+  } catch (error) {
+    console.error('[listMyConversations] Error:', error);
+    return res.status(500).json({ message: 'خطأ في جلب المحادثات' });
+  }
+};
+
 module.exports = {
   getShipmentChat,
   sendShipmentMessage,
+  listMyConversations,
 };

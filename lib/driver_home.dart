@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'app_theme.dart';
 import 'app_widgets.dart';
 import 'available_loads_screen.dart';
 import 'trip_screens.dart';
 import 'api_service.dart';
-import 'auth_screens.dart';
 import 'job_tracking_screen.dart';
 import 'vehicle_management_screen.dart';
+import 'ratings_screen.dart';
 
 class DriverHomeScreen extends StatefulWidget {
   const DriverHomeScreen({super.key});
@@ -412,18 +413,111 @@ class _ShipmentTripCard extends StatelessWidget {
   }
 }
 
-class ShipmentSummaryScreen extends StatelessWidget {
+class ShipmentSummaryScreen extends StatefulWidget {
   final Map<String, dynamic> shipment;
 
   const ShipmentSummaryScreen({super.key, required this.shipment});
 
   @override
+  State<ShipmentSummaryScreen> createState() => _ShipmentSummaryScreenState();
+}
+
+class _ShipmentSummaryScreenState extends State<ShipmentSummaryScreen> {
+  Map<String, dynamic>? _full;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final id = (widget.shipment['id'] as num?)?.toInt();
+      if (id == null) return;
+      final s = await ApiService.getShipment(id);
+      if (!mounted) return;
+      setState(() => _full = s);
+    } catch (_) {}
+  }
+
+  Future<void> _openContract() async {
+    final id = (widget.shipment['id'] as num?)?.toInt();
+    if (id == null) return;
+    try {
+      final urlStr = await ApiService.getShipmentContractSignedUrl(id);
+      if (urlStr == null || urlStr.isEmpty) return;
+      final url = Uri.parse(urlStr);
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر فتح العقد: $e')),
+      );
+    }
+  }
+
+  Future<void> _openRate() async {
+    final prefs = await SharedPreferences.getInstance();
+    final uid = prefs.getInt('user_id');
+    final role = prefs.getString('user_role');
+    final s = _full ?? widget.shipment;
+    final sid = (s['shipper_id'] as num?)?.toInt();
+    final did = (s['driver_id'] as num?)?.toInt();
+    final shipId = (s['id'] as num?)?.toInt();
+    if (uid == null || role == null || sid == null || did == null || shipId == null) {
+      return;
+    }
+    final otherId = role == 'driver' ? sid : did;
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RatingsScreen(
+          shipmentId: shipId,
+          otherUserId: otherId,
+          otherUserRole: role == 'driver' ? 'shipper' : 'driver',
+          otherUserName: role == 'driver' ? 'الشاحن' : 'السائق',
+        ),
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final shipment = _full ?? widget.shipment;
+    final delivered = (shipment['status'] ?? '').toString() == 'delivered';
+    final contractKey = (shipment['contract_pdf_key'] ?? '').toString().trim();
+
     return Scaffold(
       appBar: AppBar(title: const Text('ملخص الرحلة')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (delivered) ...[
+            if (contractKey.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: OutlinedButton.icon(
+                  onPressed: _openContract,
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  label: const Text('العقد الإلكتروني'),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: ElevatedButton.icon(
+                onPressed: _openRate,
+                icon: const Icon(Icons.star_rate_rounded),
+                label: const Text('تقييم الطرف الآخر'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: DarbakColors.primaryGreen,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ),
+          ],
           Card(
             color: Colors.blueGrey.withOpacity(0.08),
             elevation: 0,
@@ -475,33 +569,132 @@ class _DriverLifecycleObserver with WidgetsBindingObserver {
   }
 }
 
-class DriverMessagesScreen extends StatelessWidget {
+class DriverMessagesScreen extends StatefulWidget {
   const DriverMessagesScreen({super.key});
 
   @override
+  State<DriverMessagesScreen> createState() => _DriverMessagesScreenState();
+}
+
+class _DriverMessagesScreenState extends State<DriverMessagesScreen> {
+  bool _loading = true;
+  String? _error;
+  List<Map<String, dynamic>> _rows = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final raw = await ApiService.getMyChatConversations();
+      if (!mounted) return;
+      setState(() {
+        _rows = raw
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        ListTile(
-          leading: const CircleAvatar(
-            child: Icon(Icons.local_shipping_rounded),
-          ),
-          title: const Text('شركة دربك'),
-          subtitle: const Text('حسب الشحنة رقم #0045'),
-          trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => const ChatScreen(
-                  shipmentId: '0045',
-                  otherUser: 'شركة دربك',
-                ),
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_error!, textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _load,
+                icon: const Icon(Icons.refresh),
+                label: const Text('إعادة المحاولة'),
               ),
-            );
-          },
+            ],
+          ),
         ),
-      ],
+      );
+    }
+    if (_rows.isEmpty) {
+      return const Center(
+        child: Text(
+          'لا توجد محادثات بعد',
+          style: TextStyle(color: DarbakColors.textSecondary),
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: _rows.length,
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemBuilder: (context, i) {
+          final r = _rows[i];
+          final sid = (r['shipment_id'] as num?)?.toInt();
+          final name = (r['other_party_name'] ?? 'محادثة').toString();
+          final last = (r['last_message'] ?? '').toString();
+          final lastSender = (r['last_sender_id'] as num?)?.toInt();
+          return FutureBuilder<int?>(
+            future: SharedPreferences.getInstance().then((p) => p.getInt('user_id')),
+            builder: (context, snap) {
+              final myId = snap.data;
+              final unread = myId != null &&
+                  lastSender != null &&
+                  lastSender != myId;
+              return ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: DarbakColors.primaryGreen.withOpacity(0.15),
+                  child: const Icon(
+                    Icons.chat_bubble_rounded,
+                    color: DarbakColors.primaryGreen,
+                  ),
+                ),
+                title: Text(name),
+                subtitle: Text(
+                  last,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: unread
+                    ? const Icon(Icons.circle, color: Colors.redAccent, size: 12)
+                    : const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+                onTap: () {
+                  if (sid == null) return;
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ChatScreen(
+                        shipmentId: sid.toString(),
+                        otherUser: name,
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }
@@ -518,14 +711,18 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   bool _isLoading = true;
   bool _isEditing = false;
   final _formKey = GlobalKey<FormState>();
-  late TextEditingController _fullNameController;
-  late TextEditingController _emailController;
-  late TextEditingController _phoneController;
-  late TextEditingController _licenseController;
+  late final TextEditingController _fullNameController;
+  late final TextEditingController _emailController;
+  late final TextEditingController _phoneController;
+  late final TextEditingController _licenseController;
 
   @override
   void initState() {
     super.initState();
+    _fullNameController = TextEditingController();
+    _emailController = TextEditingController();
+    _phoneController = TextEditingController();
+    _licenseController = TextEditingController();
     _loadProfile();
   }
 
@@ -533,24 +730,27 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('user_id');
     if (userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('لم يتم العثور على بيانات المستخدم')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('لم يتم العثور على بيانات المستخدم')),
+        );
+      }
+      setState(() => _isLoading = false);
       return;
     }
     try {
       final user = await ApiService.getProfile(userId);
+      if (!mounted) return;
       setState(() {
         _user = user;
-        _fullNameController = TextEditingController(text: user['full_name']);
-        _emailController = TextEditingController(text: user['email'] ?? '');
-        _phoneController = TextEditingController(text: user['phone']);
-        _licenseController = TextEditingController(
-          text: user['license_no'] ?? '',
-        );
+        _fullNameController.text = user['full_name']?.toString() ?? '';
+        _emailController.text = user['email']?.toString() ?? '';
+        _phoneController.text = user['phone']?.toString() ?? '';
+        _licenseController.text = user['license_no']?.toString() ?? '';
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
       ScaffoldMessenger.of(
         context,
@@ -604,10 +804,8 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
               ),
               TextButton(
                 onPressed: () => Navigator.pop(context, true),
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
                 child: const Text('تسجيل الخروج'),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.red,
-                ),
               ),
             ],
           ),
@@ -621,12 +819,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
       await prefs.clear();
 
       if (mounted) {
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(
-            builder: (_) => const ChooseRoleScreen(),
-          ),
-          (route) => false,
-        );
+        Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
       }
     } catch (e) {
       if (mounted) {
@@ -660,7 +853,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('الملف الشخصي للسائق'),
+        title: const Text(''),
         actions: [
           if (!_isEditing)
             IconButton(
@@ -678,16 +871,29 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              CircleAvatar(
-                radius: 46,
-                backgroundColor: DarbakColors.lightBackground,
-                child: const Icon(
-                  Icons.person,
-                  size: 48,
-                  color: DarbakColors.primaryGreen,
-                ),
-              ),
+              const Center(child: DarbakProfileAvatar()),
               const SizedBox(height: 12),
+              if (!_isEditing) ...[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(
+                      Icons.star_rounded,
+                      color: DarbakColors.warningYellow,
+                      size: 22,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '${_user!['average_rating'] ?? _user!['rating'] ?? '0.0'}  (${_user!['ratings_total'] ?? 0} تقييم)',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: DarbakColors.dark,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
               if (_isEditing) ...[
                 TextFormField(
                   controller: _fullNameController,
@@ -771,16 +977,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
               _buildDocumentTile('تأمين الشاحنة', isUploaded: false),
               _buildDocumentTile('استمارة السيارة', isUploaded: true),
               const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: _logout,
-                icon: const Icon(Icons.logout),
-                label: const Text('تسجيل الخروج'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red[400],
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-              ),
+              DarbakLogoutBarButton(onPressed: _logout),
             ],
           ),
         ),

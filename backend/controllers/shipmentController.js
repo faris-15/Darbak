@@ -4,6 +4,8 @@ const Wallet = require('../models/Wallet');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
 const ShipmentStatus = require('../models/ShipmentStatus');
+const Contract = require('../models/Contract');
+const { generatePresignedUrl } = require('../utils/s3Config');
 
 const OPEN_SHIPMENT_STATUSES = ['pending', 'bidding', 'assigned', 'at_pickup', 'en_route', 'at_dropoff'];
 const MAX_OPEN_SHIPMENTS_PER_SHIPPER = 5;
@@ -138,10 +140,83 @@ const getShipment = async (req, res) => {
     const { id } = req.params;
     const shipment = await Shipment.findById(id);
     if (!shipment) return res.status(404).json({ message: 'الشحنة غير موجودة' });
-    res.json(shipment);
+    let contract_pdf_key = null;
+    try {
+      const row = await Contract.findByShipmentId(id);
+      contract_pdf_key = row?.pdf_key ?? null;
+    } catch (_) {
+      /* contracts table may not exist yet */
+    }
+    res.json({ ...shipment, contract_pdf_key });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'خطأ خادم' });
+  }
+};
+
+const getShipmentContractPdfUrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const uid = req.user?.id;
+    if (!uid) return res.status(401).json({ message: 'غير مصرح' });
+
+    const shipment = await Shipment.findById(id);
+    if (!shipment) return res.status(404).json({ message: 'الشحنة غير موجودة' });
+
+    const allowed =
+      Number(shipment.shipper_id) === Number(uid) || Number(shipment.driver_id) === Number(uid);
+    if (!allowed) return res.status(403).json({ message: 'لا يمكنك الوصول لهذا العقد' });
+
+    const row = await Contract.findByShipmentId(id);
+    if (!row?.pdf_key) return res.status(404).json({ message: 'لا يوجد عقد لهذه الشحنة' });
+
+    const url = await generatePresignedUrl(row.pdf_key);
+    if (!url) {
+      return res.status(503).json({ message: 'تعذر توليد رابط العقد — تحقق من إعدادات التخزين' });
+    }
+    return res.json({ url, pdf_key: row.pdf_key });
+  } catch (error) {
+    console.error('[getShipmentContractPdfUrl]', error);
+    return res.status(500).json({ message: 'خطأ في جلب رابط العقد' });
+  }
+};
+
+const recordLiveLocation = async (req, res) => {
+  try {
+    if (req.user?.role !== 'driver') {
+      return res.status(403).json({ message: 'Forbidden' });
+    }
+    const { id } = req.params;
+    const { location_lat, location_lng } = req.body;
+    const lat = Number(location_lat);
+    const lng = Number(location_lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return res.status(400).json({ message: 'إحداثيات غير صالحة' });
+    }
+
+    const shipment = await Shipment.findById(id);
+    if (!shipment) return res.status(404).json({ message: 'الشحنة غير موجودة' });
+    if (Number(shipment.driver_id) !== Number(req.user.id)) {
+      return res.status(403).json({ message: 'لا يمكنك تحديث موقع هذه الشحنة' });
+    }
+
+    const activeStatuses = new Set(['assigned', 'at_pickup', 'en_route', 'at_dropoff']);
+    if (!activeStatuses.has(shipment.status)) {
+      return res.status(400).json({ message: 'لا يمكن إرسال الموقع لهذه الحالة' });
+    }
+
+    const history = await ShipmentStatus.recordStatus({
+      shipment_id: id,
+      status: shipment.status,
+      location_lat: lat,
+      location_lng: lng,
+      photo_path: null,
+    });
+
+    return res.json({ message: 'تم تسجيل الموقع', history });
+  } catch (error) {
+    console.error('[recordLiveLocation]', error);
+    return res.status(500).json({ message: 'خطأ في تسجيل الموقع' });
   }
 };
 
@@ -237,7 +312,7 @@ const updateShipmentStatus = async (req, res) => {
       return res.status(500).json({ message: 'تعذر تحديث الحالة' });
     }
 
-    const photoPath = req.file ? `/uploads/epod/${req.file.filename}` : null;
+    const photoPath = req.file ? req.file.location || req.file.key : null;
     const statusRecord = await ShipmentStatus.recordStatus({
       shipment_id: id,
       status,
@@ -247,10 +322,38 @@ const updateShipmentStatus = async (req, res) => {
     });
 
     if (status === 'delivered') {
+      const now = new Date();
       await Shipment.setDeliveryMetadata(id, {
-        actualDeliveryDate: new Date(),
+        actualDeliveryDate: now,
         podPhotoPath: photoPath,
       });
+
+      // جلب بيانات العرض لمعرفة المبلغ الأساسي
+      const [bids] = await pool.execute('SELECT id, bid_amount FROM bids WHERE shipment_id = ? AND bid_status = "accepted" LIMIT 1', [id]);
+      if (bids.length > 0) {
+        const bid = bids[0];
+        const resPenalty = await Shipment.completeDelivery({
+          shipmentId: id,
+          bidAmount: Number(bid.bid_amount),
+          actualDeliveryDate: now
+        });
+
+        // إضافة الرصيد للمحفظة
+        await Wallet.adjustBalance(req.user.id, resPenalty.final_price);
+        console.log(`[updateShipmentStatus] Wallet adjusted for driver ${req.user.id} with amount ${resPenalty.final_price}`);
+      }
+    }
+
+    const [bids] = await pool.execute('SELECT id, bid_amount FROM bids WHERE shipment_id = ? AND bid_status = "accepted" LIMIT 1', [id]);
+    let penaltyInfo = null;
+    if (status === 'delivered' && bids.length > 0) {
+      // لقد تم بالفعل احتساب الجزاء وإضافته للمحفظة في الأعلى
+      // سنعيد المعلومات فقط للاستجابة
+      const shipmentAfter = await Shipment.findById(id);
+      penaltyInfo = {
+        final_price: shipmentAfter.final_price,
+        penalty_amount: Number(bids[0].bid_amount) - Number(shipmentAfter.final_price)
+      };
     }
 
     return res.json({
@@ -258,6 +361,7 @@ const updateShipmentStatus = async (req, res) => {
       shipment_id: Number(id),
       status,
       history: statusRecord,
+      penalty: penaltyInfo
     });
   } catch (error) {
     console.error('[updateShipmentStatus] Error:', error);
@@ -269,6 +373,8 @@ module.exports = {
   createShipment,
   listShipments,
   getShipment,
+  getShipmentContractPdfUrl,
+  recordLiveLocation,
   completeDelivery,
   getActiveShipmentsForDriver,
   getShipmentsForDriver,

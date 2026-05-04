@@ -106,3 +106,28 @@ CREATE TABLE IF NOT EXISTS messages (
     FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS compliance_documents (
+  document_id int(11) NOT NULL AUTO_INCREMENT,
+  user_id int(11) NOT NULL,
+  document_type enum('driver_license','vehicle_insurance','commercial_registration','tax_certificate','safety_certificate') COLLATE utf8mb4_unicode_ci NOT NULL,
+  document_url varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  issue_date date DEFAULT NULL,
+  expiry_date date NOT NULL,
+  is_verified tinyint(1) DEFAULT '0',
+  verified_by int(11) DEFAULT NULL,
+  verified_at timestamp NULL DEFAULT NULL,
+  verification_notes text COLLATE utf8mb4_unicode_ci,
+  uploaded_at timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  created_at timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (document_id),
+  KEY verified_by (verified_by),
+  KEY idx_user_id (user_id),
+  KEY idx_document_type (document_type),
+  KEY idx_expiry_date (expiry_date),
+  KEY idx_is_verified (is_verified),
+  KEY idx_compliance_status (user_id,expiry_date,is_verified),
+  CONSTRAINT compliance_documents_ibfk_1 FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT compliance_documents_ibfk_2 FOREIGN KEY (verified_by) REFERENCES users (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+

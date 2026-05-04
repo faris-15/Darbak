@@ -1,0 +1,39 @@
+# MinIO: S3 API inside container = 9000, Console UI = 9001.
+# Host ports 9190/9191 avoid clashes with other apps (e.g. XAMPP/Apache often uses 9100 on some setups).
+# Host mapping must match backend MINIO_ENDPOINT (API only — never the console port).
+services:
+  # Service name must be a valid hostname (no underscores) — mc rejects "minio_new".
+  minio:
+    image: minio/minio:latest
+    container_name: darbak-minio
+    ports:
+      - "9190:9000"   # S3 API — set MINIO_ENDPOINT=127.0.0.1:9190 in backend .env
+      - "9191:9001"   # Web console — browser only, not for AWS SDK
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password123
+    volumes:
+      - minio_new_data:/data
+    command: server /data --console-address ":9001"
+
+  # Buckets + CORS (see docker/minio-cors.json) after MinIO starts.
+  minio_init:
+    image: minio/mc:latest
+    container_name: minio_init
+    depends_on:
+      - minio
+    volumes:
+      - ./docker/minio-cors.json:/minio-cors.json:ro
+    entrypoint: /bin/sh
+    command: >
+      -c "sleep 5 &&
+      mc alias set local http://minio:9000 admin password123 &&
+      mc mb local/darbak --ignore-existing &&
+      mc mb local/darbak-uploads --ignore-existing &&
+      mc cors set local/darbak /minio-cors.json &&
+      mc cors set local/darbak-uploads /minio-cors.json &&
+      echo 'MinIO: buckets + CORS ready (darbak, darbak-uploads)'"
+    restart: "no"
+
+volumes:
+  minio_new_data:

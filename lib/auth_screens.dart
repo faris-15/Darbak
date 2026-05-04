@@ -24,21 +24,13 @@ class _SplashScreenState extends State<SplashScreen>
   void initState() {
     super.initState();
     _controller = AnimationController(vsync: this);
+    
+    // المستمع لحالة الأنيميشن: ينتقل للشاشة التالية فور اكتماله
     _controller.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
-        // Ensure minimum 4 seconds, but since animation completed, navigate
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted) {
-            _navigateToLogin(context);
-          }
-        });
-      }
-    });
-    // Also set a minimum delay of 5 seconds in case animation is short
-    Future.delayed(const Duration(seconds: 5), () {
-      if (mounted && !_controller.isCompleted) {
-        _controller.stop();
-        _navigateToLogin(context);
+        if (mounted) {
+          _navigateToLogin(context);
+        }
       }
     });
   }
@@ -80,48 +72,28 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     double screenWidth = MediaQuery.of(context).size.width;
-    double animationSize = screenWidth * 0.6;
+    double animationSize = screenWidth * 0.7;
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: SafeArea(
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // Lottie animation
-              LottieBuilder.asset(
-                'assets/animations/animation.json',
-                controller: _controller,
-                repeat: false,
-                width: animationSize,
-                height: animationSize,
-                onLoaded: (composition) {
-                  _controller.duration = composition.duration;
-                  _controller.forward();
-                },
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'D A R B A K',
-                style: TextStyle(
-                  fontSize: 24,
-                  letterSpacing: 6,
-                  fontWeight: FontWeight.w700,
-                  color: DarbakColors.dark,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'دربك... خضر',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: DarbakColors.primaryGreen,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Lottie.asset(
+              'assets/animations/animation.json',
+              controller: _controller,
+              onLoaded: (composition) {
+                // ضبط مدة المتحكم لتكون نفس مدة ملف الأنيميشن بالضبط
+                _controller
+                  ..duration = composition.duration
+                  ..forward();
+              },
+              width: animationSize,
+              height: animationSize,
+              fit: BoxFit.contain,
+            ),
+          ],
         ),
       ),
     );
@@ -563,6 +535,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   final _isthimaraNoController = TextEditingController();
 
   String? _documentPath;
+  String? _documentFileName;
   bool _loading = false;
 
   @override
@@ -584,13 +557,14 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['pdf'],
+        allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
         allowMultiple: false,
       );
 
       if (result != null && result.files.isNotEmpty) {
         setState(() {
           _documentPath = result.files.first.path;
+          _documentFileName = result.files.first.name;
         });
         ScaffoldMessenger.of(
           context,
@@ -608,7 +582,41 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   }
 
   Future<void> _register() async {
-    if (!_formKey.currentState!.validate()) return;
+    if (!_formKey.currentState!.validate()) {
+      setState(() => _currentStep = 0);
+      return;
+    }
+
+    if (widget.role == 'driver') {
+      if (_licenseNoController.text.isEmpty || 
+          _issueDateController.text.isEmpty || 
+          _expiryDateController.text.isEmpty ||
+          _truckTypeController.text.isEmpty ||
+          _plateNumberController.text.isEmpty ||
+          _isthimaraNoController.text.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('يرجى إكمال جميع بيانات السائق والشاحنة')),
+        );
+        setState(() => _currentStep = 1);
+        return;
+      }
+    } else if (widget.role == 'shipper') {
+      if (_commercialNoController.text.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('يرجى إدخال رقم السجل التجاري')),
+        );
+        setState(() => _currentStep = 1);
+        return;
+      }
+    }
+
+    if (_documentPath == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('يرجى رفع الوثيقة المطلوبة')),
+      );
+      setState(() => _currentStep = 2);
+      return;
+    }
 
     setState(() => _loading = true);
     try {
@@ -797,14 +805,31 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             title: const Text('رفع الوثائق'),
             content: Column(
               children: [
-                Text('يرجى رفع ${widget.role == 'driver' ? 'رخصة القيادة' : 'السجل التجاري'} (PDF)'),
+                Text('يرجى رفع ${widget.role == 'driver' ? 'رخصة القيادة' : 'السجل التجاري'} (PDF/Image)'),
                 const SizedBox(height: 16),
                 ElevatedButton.icon(
                   onPressed: _pickDocument,
                   icon: const Icon(Icons.upload_file),
                   label: Text(widget.role == 'driver' ? 'رفع رخصة القيادة' : 'رفع السجل التجاري'),
                 ),
-                if (_documentPath != null) Text('تم اختيار: $_documentPath'),
+                if (_documentPath != null) ...[
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      const Icon(Icons.check_circle, color: DarbakColors.successGreen),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Chip(
+                          avatar: const Icon(Icons.attach_file, size: 18),
+                          label: Text(
+                            _documentFileName ?? 'تم اختيار الملف',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 16),
                 _loading
                     ? const CircularProgressIndicator()

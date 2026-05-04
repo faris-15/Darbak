@@ -1,6 +1,9 @@
+import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
 import 'dart:async';
+import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import 'app_theme.dart';
 import 'app_widgets.dart';
 import 'api_service.dart';
@@ -187,7 +190,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen> {
                         onPressed: () {
                           Navigator.of(context).push(
                             MaterialPageRoute(
-                              builder: (_) => const ProofOfDeliveryScreen(),
+                              builder: (_) => ProofOfDeliveryScreen(shipmentId: widget.shipmentId),
                             ),
                           );
                         },
@@ -307,13 +310,72 @@ class _TimelineStep extends StatelessWidget {
 
 /// شاشة إثبات التسليم
 class ProofOfDeliveryScreen extends StatefulWidget {
-  const ProofOfDeliveryScreen({super.key});
+  final String shipmentId;
+  const ProofOfDeliveryScreen({super.key, required this.shipmentId});
 
   @override
   State<ProofOfDeliveryScreen> createState() => _ProofOfDeliveryScreenState();
 }
 
 class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
+  XFile? _imageFile;
+  final ImagePicker _picker = ImagePicker();
+  bool _isUploading = false;
+  final TextEditingController _codeController = TextEditingController();
+
+  Future<void> _pickImage() async {
+    final XFile? selected = await _picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 70,
+    );
+    if (selected != null) {
+      setState(() {
+        _imageFile = selected;
+      });
+    }
+  }
+
+  Future<void> _submit() async {
+    if (_imageFile == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('يرجى التقاط صورة للشحنة أولاً')),
+      );
+      return;
+    }
+
+    setState(() => _isUploading = true);
+    try {
+      final shipmentIdInt = int.tryParse(widget.shipmentId) ?? 0;
+      await ApiService.updateShipmentStatus(
+        shipmentId: shipmentIdInt,
+        status: 'delivered',
+        epodPhoto: _imageFile,
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('تم إثبات التسليم بنجاح!'),
+          backgroundColor: DarbakColors.successGreen,
+        ),
+      );
+      Navigator.of(context).pop();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('خطأ في الرفع: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _codeController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -321,7 +383,7 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
         title: const Text('إثبات التسليم'),
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Directionality(
             textDirection: TextDirection.rtl,
@@ -333,32 +395,43 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
                 const SizedBox(height: 16),
 
                 // منطقة الصور
-                Container(
-                  height: 200,
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: DarbakColors.lightBackground,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: DarbakColors.border),
-                  ),
-                  child: const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.camera_alt_outlined,
-                          size: 48,
-                          color: DarbakColors.textSecondary,
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          'التقط صورة للشحنة عند التسليم',
-                          style: TextStyle(
-                            color: DarbakColors.textSecondary,
-                          ),
-                        ),
-                      ],
+                GestureDetector(
+                  onTap: _pickImage,
+                  child: Container(
+                    height: 200,
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: DarbakColors.lightBackground,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: DarbakColors.border),
                     ),
+                    child: _imageFile == null
+                        ? const Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.camera_alt_outlined,
+                                  size: 48,
+                                  color: DarbakColors.textSecondary,
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  'التقط صورة للشحنة عند التسليم',
+                                  style: TextStyle(
+                                    color: DarbakColors.textSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : ClipRRect(
+                            borderRadius: BorderRadius.circular(16),
+                            child: Image.file(
+                              File(_imageFile!.path),
+                              fit: BoxFit.cover,
+                            ),
+                          ),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -391,6 +464,7 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
                 const SizedBox(height: 16),
 
                 TextFormField(
+                  controller: _codeController,
                   decoration: const InputDecoration(
                     labelText: 'كود الاستلام (اختياري)',
                     prefixIcon: Icon(Icons.qr_code_2_rounded),
@@ -399,21 +473,13 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                DarbakPrimaryButton(
-                  label: 'تأكيد التسليم',
-                  icon: Icons.check_circle_outline_rounded,
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'تم إثبات التسليم. سيتم تحديث حالة الرحلة وتحويل المبلغ للسائق.',
-                        ),
-                        backgroundColor: DarbakColors.successGreen,
+                _isUploading
+                    ? const CircularProgressIndicator()
+                    : DarbakPrimaryButton(
+                        label: 'تأكيد التسليم',
+                        icon: Icons.check_circle_outline_rounded,
+                        onPressed: _submit,
                       ),
-                    );
-                    Navigator.of(context).pop();
-                  },
-                ),
               ],
             ),
           ),
@@ -423,20 +489,56 @@ class _ProofOfDeliveryScreenState extends State<ProofOfDeliveryScreen> {
   }
 }
 
-/// شاشة العقوبة (FR-22)
+/// شاشة العقوبة (FR-22) - يتم احتسابها ديناميكياً
 class PenaltyScreen extends StatelessWidget {
-  const PenaltyScreen({super.key});
+  final Map<String, dynamic> shipmentData;
+
+  const PenaltyScreen({super.key, required this.shipmentData});
 
   @override
   Widget build(BuildContext context) {
+    // استخراج البيانات وتحويل التواريخ
+    final String shipmentId = shipmentData['shipment_id']?.toString() ?? 'N/A';
+    final double originalAmount =
+        double.tryParse(shipmentData['bid_amount']?.toString() ?? '0') ?? 0;
+
+    DateTime? expectedDate;
+    if (shipmentData['expected_delivery_at'] != null) {
+      expectedDate = DateTime.tryParse(shipmentData['expected_delivery_at']);
+    }
+
+    // نستخدم الوقت الحالي كـ "وقت تسليم" إذا لم يتوفر في البيانات
+    final DateTime actualDate = shipmentData['delivered_at'] != null
+        ? DateTime.tryParse(shipmentData['delivered_at']) ?? DateTime.now()
+        : DateTime.now();
+
+    int delayDays = 0;
+    double penaltyAmount = 0;
+    double penaltyPercentage = 0;
+
+    if (expectedDate != null && actualDate.isAfter(expectedDate)) {
+      delayDays = actualDate.difference(expectedDate).inDays;
+      // إذا كان هناك كسر يوم (مثلاً 1.2 يوم) يُحسب يومين أو نعتمد الساعات، هنا سنعتمد الأيام الكاملة
+      if (actualDate.difference(expectedDate).inHours % 24 > 0) {
+        delayDays += 1;
+      }
+      penaltyPercentage = delayDays * 0.05; // 5% لكل يوم
+      penaltyAmount = originalAmount * penaltyPercentage;
+    }
+
+    final double finalAmount = originalAmount - penaltyAmount;
+
+    final dateFormat = DateFormat('yyyy-MM-dd - hh:mm a');
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('عقوبة التأخير'),
-        backgroundColor: DarbakColors.warningYellow,
-        foregroundColor: DarbakColors.dark,
+        title: const Text('تفاصيل الدفع والعقوبات'),
+        backgroundColor:
+            delayDays > 0 ? DarbakColors.warningYellow : DarbakColors.primaryGreen,
+        foregroundColor: delayDays > 0 ? DarbakColors.dark : Colors.white,
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Directionality(
             textDirection: TextDirection.rtl,
@@ -447,35 +549,34 @@ class PenaltyScreen extends StatelessWidget {
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      colors: [
-                        DarbakColors.warningYellow,
-                        DarbakColors.warningYellow.withOpacity(0.8),
-                      ],
+                      colors: delayDays > 0
+                          ? [DarbakColors.warningYellow, DarbakColors.warningYellow.withOpacity(0.8)]
+                          : [DarbakColors.primaryGreen, DarbakColors.primaryGreen.withOpacity(0.8)],
                     ),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Column(
                     children: [
-                      const Icon(
-                        Icons.warning_amber_rounded,
-                        color: DarbakColors.dark,
+                      Icon(
+                        delayDays > 0 ? Icons.warning_amber_rounded : Icons.check_circle_outline_rounded,
+                        color: delayDays > 0 ? DarbakColors.dark : Colors.white,
                         size: 48,
                       ),
                       const SizedBox(height: 12),
-                      const Text(
-                        'تم احتساب عقوبة تأخير',
+                      Text(
+                        delayDays > 0 ? 'تم احتساب عقوبة تأخير' : 'تم التسليم في الموعد',
                         style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
-                          color: DarbakColors.dark,
+                          color: delayDays > 0 ? DarbakColors.dark : Colors.white,
                         ),
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'الشحنة SHP-001',
+                        'شحنة رقم #$shipmentId',
                         style: TextStyle(
                           fontSize: 14,
-                          color: DarbakColors.dark.withOpacity(0.8),
+                          color: delayDays > 0 ? DarbakColors.dark.withOpacity(0.8) : Colors.white70,
                         ),
                       ),
                     ],
@@ -483,39 +584,41 @@ class PenaltyScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 24),
 
-                const DarbakSectionTitle(
-                  title: 'تفاصيل الخصم',
-                ),
+                const DarbakSectionTitle(title: 'ملخص الحساب المالي'),
                 const SizedBox(height: 12),
 
-                const _PenaltyDetailRow(
+                _PenaltyDetailRow(
                   label: 'الموعد المتفق عليه (EDT)',
-                  value: '18 يناير 2025 - 06:00 م',
+                  value: expectedDate != null ? dateFormat.format(expectedDate.toLocal()) : 'غير محدد',
                 ),
-                const _PenaltyDetailRow(
+                _PenaltyDetailRow(
                   label: 'وقت التسليم الفعلي',
-                  value: '19 يناير 2025 - 02:30 ص',
-                  isWarning: true,
+                  value: dateFormat.format(actualDate.toLocal()),
+                  isWarning: delayDays > 0,
                 ),
-                const _PenaltyDetailRow(
-                  label: 'عدد أيام التأخير',
-                  value: '1 يوم',
-                  isWarning: true,
+                if (delayDays > 0) ...[
+                  _PenaltyDetailRow(
+                    label: 'مدة التأخير',
+                    value: '$delayDays يوم',
+                    isWarning: true,
+                  ),
+                  _PenaltyDetailRow(
+                    label: 'نسبة الخصم (5% يومياً)',
+                    value: '${(penaltyPercentage * 100).toInt()}%',
+                    isWarning: true,
+                  ),
+                ],
+                _PenaltyDetailRow(
+                  label: 'المبلغ الأصلي للمناقصة',
+                  value: '${originalAmount.toStringAsFixed(2)} ر.س',
                 ),
-                const _PenaltyDetailRow(
-                  label: 'نسبة الخصم (5% يومياً)',
-                  value: '5%',
-                  isWarning: true,
-                ),
-                const _PenaltyDetailRow(
-                  label: 'المبلغ الأصلي',
-                  value: '4,500 ر.س',
-                ),
-                const _PenaltyDetailRow(
-                  label: 'قيمة الخصم',
-                  value: '225 ر.س',
-                  isWarning: true,
-                ),
+                if (delayDays > 0)
+                  _PenaltyDetailRow(
+                    label: 'قيمة الخصم المستقطع',
+                    value: '- ${penaltyAmount.toStringAsFixed(2)} ر.س',
+                    isWarning: true,
+                  ),
+
                 Container(
                   margin: const EdgeInsets.only(top: 12),
                   padding: const EdgeInsets.all(16),
@@ -525,19 +628,16 @@ class PenaltyScreen extends StatelessWidget {
                     border: Border.all(color: DarbakColors.primaryGreen),
                   ),
                   child: Row(
-                    children: const [
-                      Icon(
-                        Icons.attach_money_rounded,
-                        color: DarbakColors.primaryGreen,
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        'المبلغ المستحق بعد الخصم: ',
+                    children: [
+                      const Icon(Icons.attach_money_rounded, color: DarbakColors.primaryGreen),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'المبلغ الصافي للتحويل: ',
                         style: TextStyle(fontWeight: FontWeight.w600),
                       ),
                       Text(
-                        '4,275 ر.س',
-                        style: TextStyle(
+                        '${finalAmount.toStringAsFixed(2)} ر.س',
+                        style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
                           color: DarbakColors.primaryGreen,
@@ -547,35 +647,31 @@ class PenaltyScreen extends StatelessWidget {
                   ),
                 ),
 
-                const SizedBox(height: 24),
-
+                const SizedBox(height: 32),
                 DarbakPrimaryButton(
-                  label: 'تأكيد وإنهاء الرحلة',
-                  icon: Icons.check_circle_outline_rounded,
+                  label: 'تأكيد واستلام المستحقات',
+                  icon: Icons.account_balance_wallet_rounded,
                   onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'تم إنهاء الرحلة وتحديث الحسابات. يمكنك الآن الاطلاع على تقرير الرحلة الكامل.',
-                        ),
-                      ),
-                    );
-                    Navigator.of(context).pop();
+                    Navigator.of(context).popUntil((route) => route.isFirst);
                   },
                 ),
-                const SizedBox(height: 12),
-                OutlinedButton(
-                  onPressed: () {
-                    // لاحقاً: شاشة الاعتراض على العقوبة
-                  },
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: DarbakColors.warningYellow),
+                if (delayDays > 0) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton(
+                    onPressed: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('تم رفع طلب اعتراض، سيراجع الأدمن الحالة')),
+                      );
+                    },
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: DarbakColors.warningYellow),
+                    ),
+                    child: const Text(
+                      'الاعتراض على العقوبة',
+                      style: TextStyle(color: DarbakColors.warningYellow),
+                    ),
                   ),
-                  child: const Text(
-                    'الاعتراض على العقوبة',
-                    style: TextStyle(color: DarbakColors.warningYellow),
-                  ),
-                ),
+                ],
               ],
             ),
           ),
@@ -738,6 +834,18 @@ class _ChatScreenState extends State<ChatScreen> {
                 final msg = _messages[index];
                 final senderId = (msg['sender_id'] as num?)?.toInt();
                 final isMe = senderId != null && senderId == _myUserId;
+                final senderName =
+                    (msg['sender_name'] ?? '').toString().trim();
+                final ts = msg['created_at']?.toString();
+                String timeLabel = '';
+                if (ts != null && ts.isNotEmpty) {
+                  try {
+                    timeLabel = DateFormat('dd/MM HH:mm')
+                        .format(DateTime.parse(ts).toLocal());
+                  } catch (_) {
+                    timeLabel = ts;
+                  }
+                }
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
                   child: Align(
@@ -757,11 +865,40 @@ class _ChatScreenState extends State<ChatScreen> {
                         horizontal: 14,
                         vertical: 10,
                       ),
-                      child: Text(
-                        (msg['message'] ?? '').toString(),
-                        style: TextStyle(
-                          color: isMe ? Colors.white : DarbakColors.dark,
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (senderName.isNotEmpty)
+                            Text(
+                              senderName,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: isMe
+                                    ? Colors.white70
+                                    : DarbakColors.textSecondary,
+                              ),
+                            ),
+                          Text(
+                            (msg['message'] ?? '').toString(),
+                            style: TextStyle(
+                              color: isMe ? Colors.white : DarbakColors.dark,
+                            ),
+                          ),
+                          if (timeLabel.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                timeLabel,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: isMe
+                                      ? Colors.white70
+                                      : DarbakColors.textSecondary,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ),

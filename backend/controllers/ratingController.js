@@ -1,14 +1,18 @@
 const Rating = require('../models/Rating');
 const Shipment = require('../models/Shipment');
-const User = require('../models/User');
 const Notification = require('../models/Notification');
 
 const addRating = async (req, res) => {
   try {
-    const { shipment_id, rater_id, rated_id, stars, comment } = req.body;
+    const rater_id = req.user?.id;
+    const rater_role = req.user?.role;
+    const { shipment_id, rated_id, stars, comment } = req.body;
 
-    // Validate
-    if (!shipment_id || !rater_id || !rated_id || !stars) {
+    if (!rater_id || !['driver', 'shipper'].includes(rater_role)) {
+      return res.status(401).json({ message: 'يجب تسجيل الدخول' });
+    }
+
+    if (!shipment_id || !rated_id || !stars) {
       return res.status(400).json({ message: 'حقول مطلوبة مفقودة' });
     }
 
@@ -16,7 +20,6 @@ const addRating = async (req, res) => {
       return res.status(400).json({ message: 'التقييم يجب أن يكون بين 1 و 5' });
     }
 
-    // Check if shipment exists and is delivered
     const shipment = await Shipment.findById(shipment_id);
     if (!shipment) {
       return res.status(404).json({ message: 'الشحنة غير موجودة' });
@@ -26,7 +29,24 @@ const addRating = async (req, res) => {
       return res.status(400).json({ message: 'لا يمكن تقييم شحنة لم تكتمل بعد' });
     }
 
-    // Check if rating already exists
+    if (rater_role === 'driver') {
+      if (Number(shipment.driver_id) !== Number(rater_id)) {
+        return res.status(403).json({ message: 'لا يمكنك تقييم هذه الشحنة' });
+      }
+      if (Number(rated_id) !== Number(shipment.shipper_id)) {
+        return res.status(400).json({ message: 'المقيم غير صحيح لهذه الشحنة' });
+      }
+    } else if (rater_role === 'shipper') {
+      if (Number(shipment.shipper_id) !== Number(rater_id)) {
+        return res.status(403).json({ message: 'لا يمكنك تقييم هذه الشحنة' });
+      }
+      if (!shipment.driver_id || Number(rated_id) !== Number(shipment.driver_id)) {
+        return res.status(400).json({ message: 'المقيم غير صحيح لهذه الشحنة' });
+      }
+    } else {
+      return res.status(403).json({ message: 'غير مصرح' });
+    }
+
     const existingRating = await Rating.findByShipmentAndRater(shipment_id, rater_id);
     if (existingRating) {
       return res.status(400).json({ message: 'لديك تقييم لهذه الشحنة بالفعل' });
@@ -40,13 +60,16 @@ const addRating = async (req, res) => {
       comment,
     });
 
-    // Notify the rated user
-    await Notification.create({
-      user_id: rated_id,
-      title: 'تقييم جديد',
-      message: `حصلت على تقييم ${stars} نجمة`,
-      is_read: 0,
-    });
+    try {
+      await Notification.create({
+        user_id: rated_id,
+        title: 'تقييم جديد',
+        message: `حصلت على تقييم ${stars} نجمة`,
+        is_read: 0,
+      });
+    } catch (e) {
+      console.warn('[addRating] notification:', e.message);
+    }
 
     res.status(201).json(rating);
   } catch (error) {
@@ -90,7 +113,7 @@ const updateRating = async (req, res) => {
     }
 
     const updated = await Rating.update(ratingId, {
-      stars,
+      stars: Number(stars),
       comment,
     });
 

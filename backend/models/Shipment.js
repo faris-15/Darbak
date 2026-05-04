@@ -107,7 +107,9 @@ const Shipment = {
     const actualDate = new Date(actual.getFullYear(), actual.getMonth(), actual.getDate());
 
     if (actualDate > expectedDate) {
-      penaltyPercent = 25;
+      const diffTime = actualDate - expectedDate;
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      penaltyPercent = Math.min(diffDays * 5, 100); // 5% لكل يوم تأخير، بحد أقصى 100%
     }
 
     const penaltyAmount = Number(((bidAmount * penaltyPercent) / 100).toFixed(2));
@@ -173,6 +175,34 @@ const Shipment = {
       [actualDeliveryDate, shipmentId]
     );
     return result.affectedRows > 0;
+  },
+
+  getDriverStats: async (driverId) => {
+    const [rows] = await pool.execute(
+      'SELECT COUNT(*) as completed_trips, SUM(final_price) as total_earnings FROM shipments WHERE driver_id = ? AND status = ?',
+      [driverId, 'delivered']
+    );
+    return {
+      completed_trips: rows[0]?.completed_trips || 0,
+      total_earnings: rows[0]?.total_earnings || 0,
+    };
+  },
+
+  getShipperStats: async (shipperId) => {
+    const [rows] = await pool.execute(
+      'SELECT \
+         COUNT(*) as total_shipments, \
+         SUM(CASE WHEN status = \'delivered\' THEN 1 ELSE 0 END) as delivered_shipments, \
+         SUM(CASE WHEN status != \'delivered\' AND status != \'cancelled\' THEN 1 ELSE 0 END) as active_shipments \
+       FROM shipments \
+       WHERE shipper_id = ?',
+      [shipperId]
+    );
+    return {
+      total_shipments: rows[0]?.total_shipments || 0,
+      delivered_shipments: rows[0]?.delivered_shipments || 0,
+      active_shipments: rows[0]?.active_shipments || 0,
+    };
   },
 };
 

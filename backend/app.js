@@ -6,9 +6,14 @@ const path = require('path');
 dotenv.config();
 const app = express();
 
-app.use(cors());
+app.use(
+    cors({
+        exposedHeaders: ['Content-Disposition', 'X-Preview-Kind'],
+    })
+);
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/assets', express.static(path.join(__dirname, '../assets')));
 
 const authRoutes = require('./routes/authRoutes');
 const shipmentRoutes = require('./routes/shipmentRoutes');
@@ -21,6 +26,7 @@ const ratingRoutes = require('./routes/ratingRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const shipmentStatusRoutes = require('./routes/shipmentStatusRoutes');
 const chatRoutes = require('./routes/chatRoutes');
+const adminRoutes = require('./routes/adminRoutes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/shipments', shipmentRoutes);
@@ -33,6 +39,10 @@ app.use('/api/ratings', ratingRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/shipment-status', shipmentStatusRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/admin', adminRoutes);
+
+// Serve Admin Portal
+app.use('/admin', express.static(path.join(__dirname, 'admin_portal')));
 
 app.get('/', (req, res) => {
   res.json({ message: 'Darbak backend is ready' });

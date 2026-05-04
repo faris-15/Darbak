@@ -58,7 +58,7 @@ class ApiService {
     throw DarbakException(s);
   }
 
-  static Future<Map<String, String>> _authHeaders({
+  static Future<Map<String, String>> authHeaders({
     bool jsonContentType = true,
   }) async {
     final prefs = await SharedPreferences.getInstance();
@@ -96,15 +96,35 @@ class ApiService {
     Map<String, dynamic> data,
   ) async {
     try {
-      final response = await http.post(
+      final request = http.MultipartRequest(
+        'POST',
         Uri.parse('$baseUrl/auth/register'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(data),
       );
-      if (response.statusCode == 201) {
-        return _decodeJsonBody(response) as Map<String, dynamic>;
+      
+      // Fields
+      data.forEach((key, value) {
+        if (value != null && key != 'documentPath') {
+          request.fields[key] = value.toString();
+        }
+      });
+
+      // File
+      if (data['documentPath'] != null) {
+        request.files.add(
+          await http.MultipartFile.fromPath('document', data['documentPath']),
+        );
       }
-      _handleError(response);
+
+      final streamedResponse = await request.send();
+      final responseBytes = await streamedResponse.stream.toBytes();
+      final responseBody = utf8.decode(responseBytes);
+      
+      if (streamedResponse.statusCode == 201) {
+        return jsonDecode(responseBody) as Map<String, dynamic>;
+      }
+      
+      final synthetic = http.Response(responseBody, streamedResponse.statusCode);
+      _handleError(synthetic);
     } catch (e) {
       _rethrowAsDarbak(e);
     }
@@ -114,7 +134,7 @@ class ApiService {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/shipments'),
-        headers: await _authHeaders(jsonContentType: false),
+        headers: await authHeaders(jsonContentType: false),
       );
       if (response.statusCode == 200) {
         return _decodeJsonBody(response) as List<dynamic>;
@@ -132,7 +152,7 @@ class ApiService {
       print('[ApiService.createShipment] Payload: $data');
       final response = await http.post(
         Uri.parse('$baseUrl/shipments'),
-        headers: await _authHeaders(),
+        headers: await authHeaders(),
         body: jsonEncode(data),
       );
       if (response.statusCode == 201) {
@@ -149,6 +169,7 @@ class ApiService {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/bids/shipment/$shipmentId'),
+        headers: await authHeaders(jsonContentType: false),
       );
       if (response.statusCode == 200) {
         final rawData = _decodeJsonBody(response) as List<dynamic>;
@@ -168,7 +189,7 @@ class ApiService {
       print('[ApiService.placeBid] Payload: $data');
       final response = await http.post(
         Uri.parse('$baseUrl/bids'),
-        headers: await _authHeaders(),
+        headers: await authHeaders(),
         body: jsonEncode(data),
       );
       if (response.statusCode == 201) {
@@ -188,7 +209,7 @@ class ApiService {
     try {
       final response = await http.put(
         Uri.parse('$baseUrl/auth/profile/$userId'),
-        headers: {'Content-Type': 'application/json'},
+        headers: await authHeaders(),
         body: jsonEncode(data),
       );
       if (response.statusCode == 200) {
@@ -205,6 +226,7 @@ class ApiService {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/auth/profile/$userId'),
+        headers: await authHeaders(jsonContentType: false),
       );
       if (response.statusCode == 200) {
         return _decodeJsonBody(response) as Map<String, dynamic>;
@@ -281,7 +303,7 @@ class ApiService {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/trucks/add'),
-        headers: await _authHeaders(),
+        headers: await authHeaders(),
         body: jsonEncode(data),
       );
       if (response.statusCode == 201) {
@@ -298,7 +320,7 @@ class ApiService {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/trucks/my'),
-        headers: await _authHeaders(jsonContentType: false),
+        headers: await authHeaders(jsonContentType: false),
       );
       if (response.statusCode == 200) {
         return _decodeJsonBody(response) as List<dynamic>;
@@ -317,7 +339,7 @@ class ApiService {
     try {
       final response = await http.put(
         Uri.parse('$baseUrl/trucks/$truckId'),
-        headers: await _authHeaders(),
+        headers: await authHeaders(),
         body: jsonEncode(data),
       );
       if (response.statusCode == 200) {
@@ -334,7 +356,7 @@ class ApiService {
     try {
       final response = await http.delete(
         Uri.parse('$baseUrl/trucks/$truckId'),
-        headers: await _authHeaders(jsonContentType: false),
+        headers: await authHeaders(jsonContentType: false),
       );
       if (response.statusCode == 200) {
         return;
@@ -350,10 +372,11 @@ class ApiService {
     Map<String, dynamic> data,
   ) async {
     try {
+      final payload = Map<String, dynamic>.from(data)..remove('rater_id');
       final response = await http.post(
         Uri.parse('$baseUrl/ratings'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(data),
+        headers: await authHeaders(),
+        body: jsonEncode(payload),
       );
       if (response.statusCode == 201) {
         return _decodeJsonBody(response) as Map<String, dynamic>;
@@ -366,7 +389,10 @@ class ApiService {
 
   static Future<Map<String, dynamic>> getUserRatings(int userId) async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl/ratings/user/$userId'));
+      final response = await http.get(
+        Uri.parse('$baseUrl/ratings/user/$userId'),
+        headers: await authHeaders(jsonContentType: false),
+      );
       if (response.statusCode == 200) {
         return _decodeJsonBody(response) as Map<String, dynamic>;
       }
@@ -380,6 +406,7 @@ class ApiService {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/notifications/user/$userId'),
+        headers: await authHeaders(jsonContentType: false),
       );
       if (response.statusCode == 200) {
         return _decodeJsonBody(response) as Map<String, dynamic>;
@@ -394,7 +421,7 @@ class ApiService {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/notifications/$notificationId/read'),
-        headers: {'Content-Type': 'application/json'},
+        headers: await authHeaders(),
       );
       if (response.statusCode == 200) {
         return;
@@ -409,6 +436,7 @@ class ApiService {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/shipments/$shipmentId'),
+        headers: await authHeaders(jsonContentType: false),
       );
       if (response.statusCode == 200) {
         return _decodeJsonBody(response) as Map<String, dynamic>;
@@ -423,7 +451,7 @@ class ApiService {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/shipments/driver/active'),
-        headers: await _authHeaders(jsonContentType: false),
+        headers: await authHeaders(jsonContentType: false),
       );
       if (response.statusCode == 200) {
         return _decodeJsonBody(response) as List<dynamic>;
@@ -438,7 +466,7 @@ class ApiService {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/shipments/driver'),
-        headers: await _authHeaders(jsonContentType: false),
+        headers: await authHeaders(jsonContentType: false),
       );
       if (response.statusCode == 200) {
         return _decodeJsonBody(response) as List<dynamic>;
@@ -457,35 +485,122 @@ class ApiService {
     XFile? epodPhoto,
   }) async {
     try {
-      final request = http.MultipartRequest(
-        'PATCH',
-        Uri.parse('$baseUrl/shipments/$shipmentId/status'),
-      );
-      request.headers.addAll(await _authHeaders(jsonContentType: false));
-      request.fields['status'] = status;
-      if (locationLat != null) {
-        request.fields['location_lat'] = locationLat.toString();
-      }
-      if (locationLng != null) {
-        request.fields['location_lng'] = locationLng.toString();
-      }
       if (epodPhoto != null) {
+        final request = http.MultipartRequest(
+          'PATCH',
+          Uri.parse('$baseUrl/shipments/$shipmentId/status'),
+        );
+        request.headers.addAll(await authHeaders(jsonContentType: false));
+        request.fields['status'] = status;
+        if (locationLat != null) {
+          request.fields['location_lat'] = locationLat.toString();
+        }
+        if (locationLng != null) {
+          request.fields['location_lng'] = locationLng.toString();
+        }
         request.files.add(
           await http.MultipartFile.fromPath('epodPhoto', epodPhoto.path),
         );
+
+        final streamedResponse = await request.send();
+        final responseBytes = await streamedResponse.stream.toBytes();
+        final responseBody = utf8.decode(responseBytes);
+        if (streamedResponse.statusCode == 200) {
+          final decoded = jsonDecode(responseBody) as Map<String, dynamic>;
+          // إذا كان المسار راجعاً من S3، قد نحتاج لتوقيعه أو استخدامه مباشرة إذا كان رابطاً كاملاً
+          if (decoded['history'] != null && decoded['history']['photo_path'] != null) {
+             final path = decoded['history']['photo_path'].toString();
+             // محاولة توقيع الرابط فوراً إذا لم يكن رابطاً كاملاً (رغم أن الباكيند يفضل أن يعيد رابطاً موقعاً)
+          }
+          return decoded;
+        }
+        final synthetic = http.Response(
+          responseBody,
+          streamedResponse.statusCode,
+        );
+        _handleError(synthetic);
       }
 
-      final streamedResponse = await request.send();
-      final responseBytes = await streamedResponse.stream.toBytes();
-      final responseBody = utf8.decode(responseBytes);
-      if (streamedResponse.statusCode == 200) {
-        return jsonDecode(responseBody) as Map<String, dynamic>;
-      }
-      final synthetic = http.Response(
-        responseBody,
-        streamedResponse.statusCode,
+      final response = await http.patch(
+        Uri.parse('$baseUrl/shipments/$shipmentId/status'),
+        headers: await authHeaders(),
+        body: jsonEncode({
+          'status': status,
+          if (locationLat != null) 'location_lat': locationLat,
+          if (locationLng != null) 'location_lng': locationLng,
+        }),
       );
-      _handleError(synthetic);
+      if (response.statusCode == 200) {
+        return _decodeJsonBody(response) as Map<String, dynamic>;
+      }
+      _handleError(response);
+    } catch (e) {
+      _rethrowAsDarbak(e);
+    }
+  }
+
+  static Future<void> recordShipmentLiveLocation({
+    required int shipmentId,
+    required double lat,
+    required double lng,
+  }) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/shipments/$shipmentId/live-location'),
+        headers: await authHeaders(),
+        body: jsonEncode({'location_lat': lat, 'location_lng': lng}),
+      );
+      if (response.statusCode == 200) {
+        return;
+      }
+      _handleError(response);
+    } catch (e) {
+      _rethrowAsDarbak(e);
+    }
+  }
+
+  static Future<String?> getShipmentContractSignedUrl(int shipmentId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/shipments/$shipmentId/contract'),
+        headers: await authHeaders(jsonContentType: false),
+      );
+      if (response.statusCode == 200) {
+        final m = _decodeJsonBody(response) as Map<String, dynamic>;
+        return m['url']?.toString();
+      }
+      _handleError(response);
+    } catch (e) {
+      _rethrowAsDarbak(e);
+    }
+  }
+
+  static Future<List<dynamic>> getMyChatConversations() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/chat/conversations/me'),
+        headers: await authHeaders(jsonContentType: false),
+      );
+      if (response.statusCode == 200) {
+        return _decodeJsonBody(response) as List<dynamic>;
+      }
+      _handleError(response);
+    } catch (e) {
+      _rethrowAsDarbak(e);
+    }
+  }
+
+  static Future<void> registerDevicePushToken(String token) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/auth/device-token'),
+        headers: await authHeaders(),
+        body: jsonEncode({'token': token}),
+      );
+      if (response.statusCode == 200) {
+        return;
+      }
+      _handleError(response);
     } catch (e) {
       _rethrowAsDarbak(e);
     }
@@ -531,7 +646,7 @@ class ApiService {
       print('[ApiService.acceptBid] URL: $baseUrl/bids/$bidId/accept');
       final response = await http.post(
         Uri.parse('$baseUrl/bids/$bidId/accept'),
-        headers: await _authHeaders(),
+        headers: await authHeaders(),
       );
       print('[ApiService.acceptBid] Status Code: ${response.statusCode}');
       print('[ApiService.acceptBid] Response Body: ${response.body}');
@@ -552,7 +667,7 @@ class ApiService {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/chat/$shipmentId'),
-        headers: await _authHeaders(jsonContentType: false),
+        headers: await authHeaders(jsonContentType: false),
       );
       if (response.statusCode == 200) {
         return _decodeJsonBody(response) as List<dynamic>;
@@ -571,7 +686,7 @@ class ApiService {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/chat/send'),
-        headers: await _authHeaders(),
+        headers: await authHeaders(),
         body: jsonEncode({
           'shipmentId': shipmentId,
           'receiverId': receiverId,

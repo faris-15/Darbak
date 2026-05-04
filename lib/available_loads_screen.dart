@@ -59,12 +59,14 @@ class _AvailableLoadsScreenState extends State<AvailableLoadsScreen> {
         userId = prefs.getInt('user_id') ?? 0;
       });
 
-      // Load user profile from backend if needed
+      // Load user profile from backend
       if (userId > 0) {
         final profile = await ApiService.getProfile(userId);
         setState(() {
-          userName = profile['name'] ?? userName;
-          userRating = (profile['rating'] ?? 4.8).toString();
+          userName = profile['name'] ?? profile['full_name'] ?? userName;
+          userRating = profile['rating']?.toString() ?? '0.0';
+          completedTrips = profile['completed_trips']?.toString() ?? '0';
+          totalEarnings = profile['total_earnings']?.toString() ?? '0';
         });
       }
     } catch (e) {

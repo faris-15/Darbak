@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'app_theme.dart';
+import 'app_widgets.dart';
 import 'api_service.dart';
 import 'location_picker_screens.dart';
 import 'shipment_bids_detail_screen.dart';
@@ -534,10 +534,10 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                 children: [
                     Text(
                       'بيانات الشحنة',
-                      style: GoogleFonts.cairo(
+                      style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        color: const Color(0xff168A57),
+                        color: DarbakColors.primaryGreen,
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -680,10 +680,10 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
 
                   Text(
                     'موعد التسليم الأقصى (EDT)',
-                    style: GoogleFonts.cairo(
+                    style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: const Color(0xff168A57),
+                      color: DarbakColors.primaryGreen,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -924,68 +924,258 @@ class ShipperContractScreen extends StatelessWidget {
 }
 
 /// شاشة التنبيهات
-class ShipperNotificationsScreen extends StatelessWidget {
+class ShipperNotificationsScreen extends StatefulWidget {
   const ShipperNotificationsScreen({super.key});
 
   @override
+  State<ShipperNotificationsScreen> createState() =>
+      _ShipperNotificationsScreenState();
+}
+
+class _ShipperNotificationsScreenState extends State<ShipperNotificationsScreen> {
+  bool _loading = true;
+  String? _error;
+  List<Map<String, dynamic>> _items = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = prefs.getInt('user_id');
+      if (uid == null) {
+        setState(() {
+          _error = 'لم يتم العثور على المستخدم';
+          _loading = false;
+        });
+        return;
+      }
+      final res = await ApiService.getNotifications(uid);
+      final list = (res['notifications'] as List<dynamic>? ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      if (!mounted) return;
+      setState(() {
+        _items = list;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.notifications_outlined,
-            size: 64,
-            color: DarbakColors.textSecondary,
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_error!, textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _load,
+                icon: const Icon(Icons.refresh),
+                label: const Text('إعادة المحاولة'),
+              ),
+            ],
           ),
-          SizedBox(height: 16),
-          Text(
-            'لا توجد تنبيهات جديدة',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: DarbakColors.dark,
+        ),
+      );
+    }
+    if (_items.isEmpty) {
+      return const Center(
+        child: Text(
+          'لا توجد تنبيهات',
+          style: TextStyle(color: DarbakColors.textSecondary),
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: _items.length,
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemBuilder: (context, i) {
+          final n = _items[i];
+          final read = (n['is_read'] == 1 || n['is_read'] == true);
+          return ListTile(
+            leading: Icon(
+              read ? Icons.notifications_none_rounded : Icons.notifications_active_rounded,
+              color: read ? DarbakColors.textSecondary : DarbakColors.primaryGreen,
             ),
-          ),
-          SizedBox(height: 8),
-          Text(
-            'ستظهر هنا تنبيهات التصعيد والتأخير عند ربط النظام الخلفي\n\n'
-            'مثال: تنبيه قبل 24 ساعة من EDT، تنبيه بعد ساعة تأخير',
-            style: TextStyle(fontSize: 14, color: DarbakColors.textSecondary),
-            textAlign: TextAlign.center,
-          ),
-        ],
+            title: Text(
+              (n['title'] ?? 'تنبيه').toString(),
+              style: TextStyle(
+                fontWeight: read ? FontWeight.w500 : FontWeight.w700,
+              ),
+            ),
+            subtitle: Text((n['message'] ?? '').toString()),
+            trailing: Text(
+              (n['created_at'] ?? '').toString(),
+              style: const TextStyle(fontSize: 11, color: DarbakColors.textSecondary),
+            ),
+            onTap: () async {
+              final id = (n['id'] as num?)?.toInt();
+              if (id != null) {
+                try {
+                  await ApiService.markNotificationAsRead(id);
+                } catch (_) {}
+              }
+              if (mounted) await _load();
+            },
+          );
+        },
       ),
     );
   }
 }
 
 /// شاشة الرسائل
-class ShipperMessagesScreen extends StatelessWidget {
+class ShipperMessagesScreen extends StatefulWidget {
   const ShipperMessagesScreen({super.key});
 
   @override
+  State<ShipperMessagesScreen> createState() => _ShipperMessagesScreenState();
+}
+
+class _ShipperMessagesScreenState extends State<ShipperMessagesScreen> {
+  bool _loading = true;
+  String? _error;
+  List<Map<String, dynamic>> _rows = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final raw = await ApiService.getMyChatConversations();
+      if (!mounted) return;
+      setState(() {
+        _rows = raw
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        ListTile(
-          leading: const CircleAvatar(child: Icon(Icons.person_rounded)),
-          title: const Text('السائق عبدالله'),
-          subtitle: const Text('حول شحنة الرياض - الدمام'),
-          trailing: const Icon(Icons.arrow_forward_ios_rounded, size: 16),
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => const ChatScreen(
-                  shipmentId: '0098',
-                  otherUser: 'السائق عبدالله',
-                ),
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_error!, textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _load,
+                icon: const Icon(Icons.refresh),
+                label: const Text('إعادة المحاولة'),
               ),
-            );
-          },
+            ],
+          ),
         ),
-      ],
+      );
+    }
+    if (_rows.isEmpty) {
+      return const Center(
+        child: Text(
+          'لا توجد محادثات بعد',
+          style: TextStyle(color: DarbakColors.textSecondary),
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView.separated(
+        padding: const EdgeInsets.all(16),
+        itemCount: _rows.length,
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemBuilder: (context, i) {
+          final r = _rows[i];
+          final sid = (r['shipment_id'] as num?)?.toInt();
+          final name = (r['other_party_name'] ?? 'محادثة').toString();
+          final last = (r['last_message'] ?? '').toString();
+          final lastSender = (r['last_sender_id'] as num?)?.toInt();
+          return FutureBuilder<int?>(
+            future: SharedPreferences.getInstance().then((p) => p.getInt('user_id')),
+            builder: (context, snap) {
+              final myId = snap.data;
+              final unread = myId != null &&
+                  lastSender != null &&
+                  lastSender != myId;
+              return ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: DarbakColors.primaryGreen.withOpacity(0.15),
+                  child: const Icon(
+                    Icons.chat_bubble_rounded,
+                    color: DarbakColors.primaryGreen,
+                  ),
+                ),
+                title: Text(name),
+                subtitle: Text(
+                  last,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: unread
+                    ? const Icon(Icons.circle, color: Colors.redAccent, size: 12)
+                    : const Icon(Icons.arrow_forward_ios_rounded, size: 16),
+                onTap: () {
+                  if (sid == null) return;
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ChatScreen(
+                        shipmentId: sid.toString(),
+                        otherUser: name,
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }
@@ -1004,37 +1194,52 @@ class _ShipperProfileScreenState extends State<ShipperProfileScreen> {
   bool _isEditing = false;
   Map<String, dynamic>? _user;
 
-  late TextEditingController _fullNameController;
-  late TextEditingController _emailController;
-  late TextEditingController _phoneController;
+  late final TextEditingController _fullNameController;
+  late final TextEditingController _emailController;
+  late final TextEditingController _phoneController;
 
   @override
   void initState() {
     super.initState();
+    _fullNameController = TextEditingController();
+    _emailController = TextEditingController();
+    _phoneController = TextEditingController();
     _loadProfile();
+  }
+
+  @override
+  void dispose() {
+    _fullNameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadProfile() async {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getInt('user_id');
     if (userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('لم يتم العثور على بيانات المستخدم')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('لم يتم العثور على بيانات المستخدم')),
+        );
+      }
       setState(() => _loading = false);
       return;
     }
 
     try {
       final profile = await ApiService.getProfile(userId);
-      _fullNameController = TextEditingController(text: profile['full_name']);
-      _emailController = TextEditingController(text: profile['email']);
-      _phoneController = TextEditingController(text: profile['phone']);
+      if (!mounted) return;
       setState(() {
         _user = profile;
+        _fullNameController.text = profile['full_name']?.toString() ?? '';
+        _emailController.text = profile['email']?.toString() ?? '';
+        _phoneController.text = profile['phone']?.toString() ?? '';
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(
         context,
@@ -1080,7 +1285,7 @@ class _ShipperProfileScreenState extends State<ShipperProfileScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ملف الشركة'),
+        title: const Text(''),
         actions: [
           if (!_isEditing)
             IconButton(
@@ -1098,6 +1303,12 @@ class _ShipperProfileScreenState extends State<ShipperProfileScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (!_isEditing) ...[
+                const Center(
+                  child: DarbakProfileAvatar(icon: Icons.domain_rounded),
+                ),
+                const SizedBox(height: 12),
+              ],
               TextFormField(
                 controller: _fullNameController,
                 decoration: const InputDecoration(labelText: 'الاسم الكامل'),
@@ -1126,25 +1337,93 @@ class _ShipperProfileScreenState extends State<ShipperProfileScreen> {
               const SizedBox(height: 20),
               if (!_isEditing) ...[
                 _buildInfoCard('الشركة', _user?['full_name'] ?? ''),
+                _buildInfoCard('رقم السجل التجاري', _user?['commercial_no'] ?? 'غير متوفر'),
                 _buildInfoCard(
                   'حالة التحقق',
-                  _user?['verification_status'] ?? '',
+                  _user?['verification_status'] == 'verified' ? 'موثق' : 'قيد المراجعة',
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildStatCard(
+                        'إجمالي الشحنات',
+                        (_user?['total_shipments'] ?? 0).toString(),
+                        Icons.inventory_2_outlined,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildStatCard(
+                        'تم تسليمها',
+                        (_user?['delivered_shipments'] ?? 0).toString(),
+                        Icons.check_circle_outline,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildStatCard(
+                        'نشطة حالياً',
+                        (_user?['active_shipments'] ?? 0).toString(),
+                        Icons.local_shipping_outlined,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildStatCard(
+                        'التقييم العام',
+                        _user?['average_rating']?.toString() ??
+                            _user?['rating']?.toString() ??
+                            '0.0',
+                        Icons.star_outline_rounded,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  onPressed: _logout,
-                  icon: const Icon(Icons.logout),
-                  label: const Text('تسجيل الخروج'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red[400],
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
+                DarbakLogoutBarButton(onPressed: _logout),
               ],
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildStatCard(String title, String value, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: DarbakColors.cardBackground,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.withOpacity(0.1)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: DarbakColors.primaryGreen, size: 24),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: DarbakColors.dark,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 12,
+              color: DarbakColors.textSecondary,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
       ),
     );
   }
@@ -1163,6 +1442,7 @@ class _ShipperProfileScreenState extends State<ShipperProfileScreen> {
               ),
               TextButton(
                 onPressed: () => Navigator.pop(context, true),
+                style: TextButton.styleFrom(foregroundColor: Colors.red),
                 child: const Text('تسجيل الخروج'),
               ),
             ],

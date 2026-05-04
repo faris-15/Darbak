@@ -1,0 +1,111 @@
+rver running on port 5000
+تم الاتصال بـ XAMPP MySQL بنجاح
+--- [S3 Upload Attempt] ---
+File Name: IMG_20260501_034410.jpg
+MIME Type: application/octet-stream
+Extension: .jpg
+Result: ACCEPTED
+[register] Input: {
+  fullName: 'رازن البشري',
+  role: 'driver',
+  finalIssueDate: '2026-05-01',
+  finalExpiryDate: '2026-05-30'
+}
+--- [S3 Upload Attempt] ---
+File Name: IMG_20260501_034410.jpg
+MIME Type: application/octet-stream
+Extension: .jpg
+Result: ACCEPTED
+[register] Input: {
+  fullName: 'عبدالرحيم',
+  role: 'shipper',
+  finalIssueDate: null,
+  finalExpiryDate: null
+}
+[createShipment] Input: {
+  shipperId: 27,
+  weightKg: 17,
+  period: 'evening',
+  basePrice: 1400,
+  expectedDeliveryDate: '2026-05-30'
+}
+[createShipment] Success: { shipmentId: 19, period: 'evening' }
+[Bid.getBidsByShipment] Fetching bids for shipmentId: 19
+[Bid.getBidsByShipment] Raw bids from DB: []
+[Bid.getBidsByShipment] Found 0 bids
+Sending to Flutter: []
+[Bid.getBidsByShipment] Fetching bids for shipmentId: 19
+[Bid.getBidsByShipment] Raw bids from DB: []
+[Bid.getBidsByShipment] Found 0 bids
+Sending to Flutter: []
+[Bid.createBid] Input: { shipmentId: 19, driverId: 26, bidAmount: 1190, estimatedDays: 5 }
+[Bid.createBid] Bid created: { bidId: 13, driverId: 26, bidAmount: 1190 }
+[Bid.getBidsByShipment] Fetching bids for shipmentId: 19
+[Bid.getBidsByShipment] Raw bids from DB: [
+  {
+    "id": 13,
+    "shipment_id": 19,
+    "driver_id": 26,
+    "bid_amount": "1190.00",
+    "estimated_days": 5,
+    "bid_status": "pending",
+    "user_id": 26,
+    "driver_name": "رازن البشري",
+    "license_no": "6eaff8a05ae25ca1d29449c0fa52d0a8",
+    "phone": "4567",
+    "driver_rating": "0.0000",
+    "rating_count": 0
+  }
+]
+Original Data from DB: 6eaff8a05ae25ca1d29449c0fa52d0a8
+[Bid.getBidsByShipment] Bid: 13 Driver: رازن البشري
+[Bid.getBidsByShipment] Found 1 bids
+Sending to Flutter: [
+  {
+    "id": 13,
+    "shipment_id": 19,
+    "driver_id": 26,
+    "bid_amount": 1190,
+    "estimated_days": 5,
+    "bid_status": "pending",
+    "user_id": 26,
+    "driver_name": "رازن البشري",
+    "license_no": "1123353534534",
+    "phone": "4567",
+    "driver_rating": 0,
+    "rating_count": 0
+  }
+]
+[Bid.acceptBid] Accepting bid: 13
+[Bid.acceptBid] Bid found: 13 Status: pending
+[Bid.acceptBid] Shipment found: 19 Status: bidding
+[Bid.acceptBid] Transaction started
+[Bid.acceptBid] Updated target bid, affected rows: 1
+[Bid.acceptBid] Rejected other bids, affected rows: 0
+[Bid.acceptBid] Updated shipment, affected rows: 1
+[Bid.acceptBid] Transaction committed successfully
+[Bid.acceptBid] Driver acceptance notification sent
+[Bid.acceptBid] Rejection notifications sent to 0 drivers
+[Bid.acceptBid] Database connection released
+--- [S3 Upload Attempt] ---
+File Name: IMG_20260501_034410.jpg
+MIME Type: application/octet-stream
+Extension: .jpg
+Result: ACCEPTED
+
+
+---------------------------------
+
+main.dart
+/FilePickerUtils( 6814): Caching from URI: content://com.android.providers.media.documents/document/image%3A35
+I/Surface ( 6814): Creating surface for consumer unnamed-6814-8 with slotExpansion=1 for 64 slots
+I/Surface ( 6814): Creating surface for consumer VRI[MainActivity]#8(BLAST Consumer)8 with slotExpansion=1 for 64 slots
+I/Surface ( 6814): Creating surface for consumer unnamed-6814-9 with slotExpansion=1 for 64 slots
+I/Surface ( 6814): Creating surface for consumer 31b3618 SurfaceView[com.example.darbak/com.example.darbak.MainActivity]#9(BLAST Consumer)9 with slotExpansion=1 for 64 slots
+D/FilePickerUtils( 6814): File loaded and cached at:/data/user/0/com.example.darbak/cache/file_picker/1777596865440/IMG_20260501_034410.jpg
+D/FilePickerDelegate( 6814): File path:[com.mr.flutter.plugin.filepicker.FileInfo@db45f90]
+D/InsetsController( 6814): hide(ime())
+I/ImeTracker( 6814): com.example.darbak:4c611cce: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+I/UrlLauncher( 6814): component name for http://192.168.0.64:9000/darbak-uploads/contracts/shipment-19-1777596626394.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Content-Sha256=UNSIGNED-PAYLOAD&X-Amz-Credential=admin%2F20260501%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260501T005510Z&X-Amz-Expires=3600&X-Amz-Signature=7fa12a4cf36014530aa640ba83a5c27734cb5992029af7bebccf9e418c0b870f&X-Amz-SignedHeaders=host&response-content-disposition=inline&response-content-type=application%2Fpdf&x-amz-checksum-mode=ENABLED&x-id=GetObject is null
+I/UrlLauncher( 6814): component name for http://flutter.dev is null
+

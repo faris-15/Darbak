@@ -56,6 +56,15 @@ const User = {
     const [result] = await pool.execute('UPDATE users SET verification_status = ? WHERE id = ?', [status, id]);
     return result.affectedRows > 0;
   },
+
+  /** يتطلب عمود `is_active` (انظر migrations_06_admin_dashboard.sql) */
+  updateActiveFlag: async (id, active) => {
+    const [result] = await pool.execute('UPDATE users SET is_active = ? WHERE id = ?', [
+      active ? 1 : 0,
+      id,
+    ]);
+    return result.affectedRows > 0;
+  },
 };
 
 module.exports = User;

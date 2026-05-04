@@ -45,5 +45,7 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>نستخدم موقعك لمشاركة تتبع الشحنة مع الشاحن أثناء الرحلة.</string>
 </dict>
 </plist>

@@ -1,45 +1,50 @@
 const express = require('express');
-const path = require('path');
-const fs = require('fs');
-const multer = require('multer');
 const { body, validationResult } = require('express-validator');
 const {
   createShipment,
   listShipments,
   getShipment,
+  getShipmentContractPdfUrl,
+  recordLiveLocation,
   completeDelivery,
   getActiveShipmentsForDriver,
   getShipmentsForDriver,
   updateShipmentStatus,
 } = require('../controllers/shipmentController');
 const { requireAuth } = require('../middleware/authMiddleware');
+const { upload, logS3SdkErrorResponsePreview, sanitizeApiErrorMessage } = require('../utils/s3Config'); // استيراد إعدادات S3 الجاهزة
 
 const router = express.Router();
-const epodUploadDir = path.join(__dirname, '..', 'uploads', 'epod');
 
-if (!fs.existsSync(epodUploadDir)) {
-  fs.mkdirSync(epodUploadDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, epodUploadDir),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || '.jpg');
-    cb(null, `shipment-${req.params.id}-${Date.now()}${ext}`);
-  },
-});
-
-const upload = multer({
-  storage,
-  fileFilter: (_req, file, cb) => {
-    if (file.mimetype && file.mimetype.startsWith('image/')) {
-      cb(null, true);
-      return;
+// Middleware لمعالجة أخطاء Multer-S3 وإرجاع JSON
+const handleUpload = (req, res, next) => {
+  // نقوم بتمرير 'epodPhoto' كاسم للحقل المتوقع من التطبيق
+  upload.single('epodPhoto')(req, res, async (err) => {
+    if (err) {
+      console.error('[Multer-S3 Error]:', err);
+      await logS3SdkErrorResponsePreview(err);
+      return res.status(400).json({
+        success: false,
+        message: 'خطأ في رفع الملف إلى S3: ' + sanitizeApiErrorMessage(err.message),
+      });
     }
-    cb(new Error('Only image uploads are allowed'));
-  },
-  limits: { fileSize: 8 * 1024 * 1024 },
-});
+
+    // إذا تم الرفع بنجاح، multer-s3 يضيف المعلومات لـ req.file
+    if (req.file) {
+      // نضع المفتاح (key) في body لسهولة استخدامه في الكنترولر
+      req.body.documentPath = req.file.key;
+    }
+    next();
+  });
+};
+
+const maybeMultipart = (req, res, next) => {
+  const ct = req.headers['content-type'] || '';
+  if (ct.includes('multipart/form-data')) {
+    return handleUpload(req, res, next);
+  }
+  return next();
+};
 
 router.post(
   '/',
@@ -62,8 +67,13 @@ router.post(
 router.get('/', listShipments);
 router.get('/driver', requireAuth, getShipmentsForDriver);
 router.get('/driver/active', requireAuth, getActiveShipmentsForDriver);
+router.get('/:id/contract', requireAuth, getShipmentContractPdfUrl);
+router.post('/:id/live-location', requireAuth, recordLiveLocation);
 router.get('/:id', getShipment);
-router.patch('/:id/status', requireAuth, upload.single('epodPhoto'), updateShipmentStatus);
+
+// استخدام S3 للرفع عند تحديث الحالة (multipart فقط عند وجود ملف)
+router.patch('/:id/status', requireAuth, maybeMultipart, updateShipmentStatus);
+
 router.post('/:id/complete', [body('bidId').isInt(), body('actualDeliveryDate').isISO8601()], (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });

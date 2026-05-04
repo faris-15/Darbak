@@ -1,9 +1,11 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { requireAuth } = require('../middleware/authMiddleware');
-const { getShipmentChat, sendShipmentMessage } = require('../controllers/chatController');
+const { getShipmentChat, sendShipmentMessage, listMyConversations } = require('../controllers/chatController');
 
 const router = express.Router();
+
+router.get('/conversations/me', requireAuth, listMyConversations);
 
 router.get('/:shipmentId', requireAuth, getShipmentChat);
 

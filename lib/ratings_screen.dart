@@ -75,7 +75,6 @@ class _RatingsScreenState extends State<RatingsScreen> {
     try {
       await ApiService.addRating({
         'shipment_id': widget.shipmentId,
-        'rater_id': userId,
         'rated_id': widget.otherUserId,
         'stars': _selectedRating,
         'comment': _commentsController.text.trim(),
@@ -341,20 +340,27 @@ class _RatingsScreenState extends State<RatingsScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _buildStarRating(rating['rating_stars'] ?? 0),
-                  Text(
-                    rating['rater_role'] == 'driver' ? 'سائق' : 'شاحن',
-                    style: const TextStyle(
+                  _buildStarRating(
+                    int.tryParse(
+                          '${rating['stars'] ?? rating['rating_stars'] ?? 0}',
+                        ) ??
+                        0,
+                  ),
+                  const Text(
+                    'تقييم',
+                    style: TextStyle(
                       fontSize: 11,
                       color: DarbakColors.textSecondary,
                     ),
                   ),
                 ],
               ),
-              if ((rating['comments'] as String?)?.isNotEmpty == true) ...[
+              if (((rating['comment'] ?? rating['comments']) as String?)
+                      ?.isNotEmpty ==
+                  true) ...[
                 const SizedBox(height: 8),
                 Text(
-                  rating['comments'],
+                  (rating['comment'] ?? rating['comments']).toString(),
                   style: const TextStyle(
                     fontSize: 12,
                     color: DarbakColors.dark,
@@ -558,31 +564,36 @@ class _UserRatingsOverviewScreenState extends State<UserRatingsOverviewScreen> {
                               children: [
                                 Row(
                                   children: List.generate(5, (idx) {
+                                    final starCount = int.tryParse(
+                                          '${rating['stars'] ?? rating['rating_stars'] ?? 0}',
+                                        ) ??
+                                        0;
                                     return Icon(
                                       Icons.star,
                                       size: 16,
-                                      color: idx < (rating['rating_stars'] ?? 0)
+                                      color: idx < starCount
                                           ? Colors.amber
                                           : Colors.grey[300],
                                     );
                                   }),
                                 ),
-                                Text(
-                                  rating['rater_role'] == 'driver'
-                                      ? 'سائق'
-                                      : 'شاحن',
-                                  style: const TextStyle(
+                                const Text(
+                                  'تقييم',
+                                  style: TextStyle(
                                     fontSize: 11,
                                     color: DarbakColors.textSecondary,
                                   ),
                                 ),
                               ],
                             ),
-                            if ((rating['comments'] as String?)?.isNotEmpty ==
+                            if (((rating['comment'] ?? rating['comments'])
+                                        as String?)
+                                    ?.isNotEmpty ==
                                 true) ...[
                               const SizedBox(height: 8),
                               Text(
-                                rating['comments'],
+                                (rating['comment'] ?? rating['comments'])
+                                    .toString(),
                                 style: const TextStyle(
                                   fontSize: 12,
                                   color: DarbakColors.dark,

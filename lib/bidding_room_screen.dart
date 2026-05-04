@@ -42,6 +42,7 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
   String validationError = '';
   List<BidModel> existingBids = [];
   double? lowestBid;
+  bool _licenseExpired = false;
 
   @override
   void initState() {
@@ -50,6 +51,23 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
     _priceController.text = basePrice.toString();
     _daysController.text = '5';
     _loadExistingBids();
+    _checkLicenseExpiry();
+  }
+
+  Future<void> _checkLicenseExpiry() async {
+    try {
+      final u = await ApiService.getProfile(widget.driverId);
+      final exp = u['expiry_date']?.toString();
+      if (exp == null || exp.isEmpty) return;
+      final d = DateTime.tryParse(exp);
+      if (d == null) return;
+      final today = DateTime.now();
+      final end = DateTime(d.year, d.month, d.day);
+      final start = DateTime(today.year, today.month, today.day);
+      if (end.isBefore(start) && mounted) {
+        setState(() => _licenseExpired = true);
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadExistingBids() async {
@@ -100,6 +118,18 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('خطأ: لم يتم العثور على بيانات السائق'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
+    }
+
+    if (_licenseExpired) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'انتهت صلاحية رخصة القيادة. لا يمكنك تقديم عروض حتى تجدد الرخصة.',
+          ),
           backgroundColor: AppColors.danger,
         ),
       );

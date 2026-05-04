@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import 'dart:async';
 import 'dart:io';
+import 'package:http/http.dart' as http;
 import 'app_theme.dart';
 import 'app_widgets.dart';
 import 'api_service.dart';
 import 'trip_screens.dart';
+import 'ratings_screen.dart';
 
 /// شاشة متابعة حالة الرحلة مع Timeline و ePOD
 class JobTrackingScreen extends StatefulWidget {
@@ -30,6 +37,7 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
   String? _podPhotoBackendPath;
   bool _isUpdatingStatus = false;
   bool _isSubmittingPOD = false;
+  Timer? _locationTimer;
   late final AnimationController _pulseController;
   late final Animation<double> _pulseAnimation;
   static const Set<String> _chatEnabledStatuses = {
@@ -89,8 +97,86 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
 
   @override
   void dispose() {
+    _locationTimer?.cancel();
     _pulseController.dispose();
     super.dispose();
+  }
+
+  void _restartLocationPing() {
+    _locationTimer?.cancel();
+    _locationTimer = null;
+    final shipment = _shipment ?? widget.shipmentData;
+    final st = (shipment['status'] ?? '').toString();
+    const active = {'assigned', 'at_pickup', 'en_route', 'at_dropoff'};
+    if (!active.contains(st)) return;
+    _locationTimer = Timer.periodic(const Duration(seconds: 40), (_) {
+      _pushLiveLocation();
+    });
+    _pushLiveLocation();
+  }
+
+  Future<void> _pushLiveLocation() async {
+    try {
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      await ApiService.recordShipmentLiveLocation(
+        shipmentId: widget.shipmentId,
+        lat: pos.latitude,
+        lng: pos.longitude,
+      );
+    } catch (_) {
+      /* ignore intermittent GPS / network errors */
+    }
+  }
+
+  Future<void> _openRatePartner() async {
+    final prefs = await SharedPreferences.getInstance();
+    final uid = prefs.getInt('user_id');
+    final role = prefs.getString('user_role');
+    final s = _shipment ?? widget.shipmentData;
+    final sid = (s['shipper_id'] as num?)?.toInt();
+    final did = (s['driver_id'] as num?)?.toInt();
+    if (uid == null || role == null || sid == null || did == null) return;
+    final otherId = role == 'driver' ? sid : did;
+    if (otherId == uid) return;
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RatingsScreen(
+          shipmentId: widget.shipmentId,
+          otherUserId: otherId,
+          otherUserRole: role == 'driver' ? 'shipper' : 'driver',
+          otherUserName: role == 'driver' ? 'الشاحن' : 'السائق',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openContract() async {
+    try {
+      final urlStr = await ApiService.getShipmentContractSignedUrl(
+        widget.shipmentId,
+      );
+      if (urlStr == null || urlStr.isEmpty) return;
+      final url = Uri.parse(urlStr);
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذر فتح العقد: $e')),
+      );
+    }
   }
 
   Future<void> _loadShipmentData() async {
@@ -106,6 +192,7 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
         _podPhotoBackendPath = _extractLatestPodPath(history);
         _isLoading = false;
       });
+      _restartLocationPing();
     } catch (e) {
       setState(() => _isLoading = false);
       final message = e.toString();
@@ -122,17 +209,30 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
   }
 
   Future<void> _pickPODPhoto() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? image = await picker.pickImage(source: ImageSource.camera);
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
+      );
 
-    if (image != null) {
-      setState(() {
-        _podPhotoFile = image;
-      });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('تم التقاط الصورة بنجاح')));
+      if (result != null && result.files.single.path != null) {
+        setState(() {
+          _podPhotoFile = XFile(result.files.single.path!);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم اختيار الملف بنجاح')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('خطأ في اختيار الملف: $e')),
+      );
     }
+  }
+
+  bool _isPdf(String? path) {
+    if (path == null) return false;
+    return path.toLowerCase().endsWith('.pdf');
   }
 
   Future<void> _submitPOD() async {
@@ -190,12 +290,33 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
     return status;
   }
 
+  Future<Position?> _tryCurrentPosition() async {
+    try {
+      var perm = await Geolocator.checkPermission();
+      if (perm == LocationPermission.denied) {
+        perm = await Geolocator.requestPermission();
+      }
+      if (perm == LocationPermission.denied ||
+          perm == LocationPermission.deniedForever) {
+        return null;
+      }
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.medium,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _updateStatus(String newStatus) async {
     setState(() => _isUpdatingStatus = true);
     try {
+      final pos = await _tryCurrentPosition();
       await ApiService.updateShipmentStatus(
         shipmentId: widget.shipmentId,
         status: newStatus,
+        locationLat: pos?.latitude,
+        locationLng: pos?.longitude,
       );
 
       await _loadShipmentData();
@@ -288,6 +409,24 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
     return null;
   }
 
+  Future<String?> _getSignedUrlOrPath(String path) async {
+    if (path.startsWith('http')) return path;
+    try {
+      // استخدام API التوقيع الموجود في الباكيند
+      final response = await http.get(
+        Uri.parse('${ApiService.baseUrl}/admin/get-signed-url?url=${Uri.encodeComponent(path)}'),
+        headers: await ApiService.authHeaders(jsonContentType: false),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(response.bodyBytes));
+        return data['signedUrl'];
+      }
+    } catch (e) {
+      debugPrint('Error getting signed URL: $e');
+    }
+    return _buildBackendImageUrl(path);
+  }
+
   String? _buildBackendImageUrl(String? maybePath) {
     if (maybePath == null || maybePath.trim().isEmpty) return null;
     final path = maybePath.trim();
@@ -296,10 +435,19 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
     }
     final apiUri = Uri.parse(ApiService.baseUrl);
     final origin = '${apiUri.scheme}://${apiUri.host}${apiUri.hasPort ? ':${apiUri.port}' : ''}';
-    if (path.startsWith('/')) {
-      return '$origin$path';
+    
+    // التحقق إذا كان المسار عبارة عن مفتاح S3 وليس رابطاً كاملاً
+    if (!path.startsWith('http')) {
+      // نفضل استخدام endpoint التوقيع في AdminController أو آلية مماثلة لو كانت متوفرة للكل
+      // حالياً سنحاول بنائه كـ Static URL إذا كان الـ Bucket مفتوحاً أو عبر بروكسي الباكيند
+      if (path.startsWith('/')) {
+        return '$origin$path';
+      }
+      // إذا كان مخزناً كـ Key في S3 (مثل epod/xxx.jpg)
+      return '$origin/api/admin/get-signed-url?url=${Uri.encodeComponent(path)}'; 
     }
-    return '$origin/$path';
+    
+    return path;
   }
 
   @override
@@ -460,35 +608,72 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(12),
-                      child: Image.file(
-                        File(_podPhotoFile!.path),
-                        height: 200,
-                        fit: BoxFit.cover,
-                      ),
+                      child: _isPdf(_podPhotoFile!.path)
+                          ? Container(
+                              height: 150,
+                              width: double.infinity,
+                              color: Colors.red.shade50,
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.picture_as_pdf, size: 48, color: Colors.red),
+                                  const SizedBox(height: 8),
+                                  Text(_podPhotoFile!.name),
+                                ],
+                              ),
+                            )
+                          : Image.file(
+                              File(_podPhotoFile!.path),
+                              height: 200,
+                              fit: BoxFit.cover,
+                            ),
                     ),
                   ),
                 if (_podPhotoFile == null &&
-                    _buildBackendImageUrl(_podPhotoBackendPath) != null)
-                  Card(
-                    elevation: 0,
-                    color: DarbakColors.cardBackground,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        _buildBackendImageUrl(_podPhotoBackendPath)!,
-                        height: 200,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => const SizedBox(
-                          height: 120,
-                          child: Center(
-                            child: Text('تعذر تحميل صورة إثبات التسليم'),
-                          ),
+                    _podPhotoBackendPath != null)
+                  FutureBuilder<String?>(
+                    future: _getSignedUrlOrPath(_podPhotoBackendPath!),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()));
+                      }
+                      final url = snapshot.data;
+                      if (url == null) return const SizedBox.shrink();
+
+                      return Card(
+                        elevation: 0,
+                        color: DarbakColors.cardBackground,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                      ),
-                    ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: _isPdf(_podPhotoBackendPath)
+                              ? ListTile(
+                                  leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
+                                  title: const Text('عرض وثيقة PDF'),
+                                  onTap: () async {
+                                    final uri = Uri.parse(url);
+                                    if (await canLaunchUrl(uri)) {
+                                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                    }
+                                  },
+                                )
+                              : Image.network(
+                                  url,
+                                  height: 200,
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => const SizedBox(
+                                    height: 120,
+                                    child: Center(
+                                      child: Text('تعذر تحميل صورة إثبات التسليم'),
+                                    ),
+                                  ),
+                                ),
+                        ),
+                      );
+                    },
                   ),
                 const SizedBox(height: 12),
                 if (shipment['status'] == 'at_dropoff')
@@ -517,6 +702,39 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
               ],
 
               const SizedBox(height: 24),
+
+              if ((shipment['status'] ?? '').toString() == 'delivered') ...[
+                const Text(
+                  'بعد التسليم',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: DarbakColors.dark,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                if ((_shipment?['contract_pdf_key'] ?? shipment['contract_pdf_key'])
+                        ?.toString()
+                        .trim()
+                        .isNotEmpty ==
+                    true)
+                  OutlinedButton.icon(
+                    onPressed: _openContract,
+                    icon: const Icon(Icons.picture_as_pdf_outlined),
+                    label: const Text('عرض / تنزيل العقد الإلكتروني'),
+                  ),
+                const SizedBox(height: 8),
+                ElevatedButton.icon(
+                  onPressed: _openRatePartner,
+                  icon: const Icon(Icons.star_rate_rounded),
+                  label: const Text('تقييم الطرف الآخر'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: DarbakColors.primaryGreen,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
 
               // Shipment Details
               const Divider(),

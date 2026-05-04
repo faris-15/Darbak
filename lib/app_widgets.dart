@@ -150,3 +150,60 @@ class DarbakAuthTextField extends StatelessWidget {
     );
   }
 }
+
+/// Shared logout control for driver and shipper profiles (same size, color, icon).
+class DarbakLogoutBarButton extends StatelessWidget {
+  final VoidCallback onPressed;
+
+  const DarbakLogoutBarButton({super.key, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 52,
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: onPressed,
+        icon: const Icon(Icons.logout_rounded, size: 22, color: Colors.white),
+        label: const Text(
+          'تسجيل الخروج',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.red.shade400,
+          foregroundColor: Colors.white,
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class DarbakProfileAvatar extends StatelessWidget {
+  final IconData icon;
+
+  const DarbakProfileAvatar({
+    super.key,
+    this.icon = Icons.person_rounded,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return CircleAvatar(
+      radius: 46,
+      backgroundColor: DarbakColors.lightBackground,
+      child: Icon(
+        icon,
+        size: 48,
+        color: DarbakColors.primaryGreen,
+      ),
+    );
+  }
+}
