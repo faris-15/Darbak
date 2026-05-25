@@ -1,15 +1,49 @@
+/**
+ * مصادقة المستخدمين: تسجيل، دخول بكلمة مرور MySQL، ودخول/مزامنة عبر Firebase Auth.
+ * تمت إزالة مسارات إعادة تعيين كلمة المرور عبر SMTP/الرموز المخزّنة محلياً؛ الاستعادة عبر POST /auth/password-reset-request ثم بريد Firebase.
+ * بعد التسجيل في MySQL يُنشأ (إن أمكن) مستخدم بنفس البريف وكلمة المرور في Firebase عبر Admin SDK؛ طلب إعادة التعيين يمر عبر POST /auth/password-reset-request (sendOobCode).
+ */
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const pool = require('../config/db');
 const User = require('../models/User');
-const Wallet = require('../models/Wallet');
 const Truck = require('../models/Truck');
-const Rating = require('../models/Rating');
-const Shipment = require('../models/Shipment');
-const ComplianceDocument = require('../models/ComplianceDocument');
 const { encryptText, decryptText } = require('../utils/encryption');
+const { buildProfileResponse, resolveProfileImage } = require('../services/profileService');
+const { emitAdminDashboard } = require('../utils/adminRealtime');
+const { getFirebaseAdminApp } = require('../utils/firebaseAdminApp');
+const { validateTruckClassification } = require('../utils/truckClassificationValidator');
+const { ensureTruckClassificationSchema } = require('../utils/truckClassificationSchema');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'secret_key';
+
+/**
+ * ينشئ مستخدم Email/Password في Firebase (نفس بريد التسجيل وكلمة المرور) حتى تعمل إعادة التعيين من التطبيق.
+ * لا يُفشل مسار التسجيم في MySQL إذا تعذّر Firebase؛ يُسجّل تحذير فقط.
+ */
+async function ensureFirebaseAuthUserForRegistration(email, plainPassword) {
+  const adminApp = getFirebaseAdminApp();
+  if (!adminApp) {
+    console.warn(
+      '[register] Firebase Admin غير جاهز (تأكد من FIREBASE_SERVICE_ACCOUNT_PATH ووجود ملف JSON). تخطي إنشاء مستخدم Firebase',
+    );
+    return;
+  }
+  try {
+    await adminApp.auth().createUser({
+      email,
+      password: plainPassword,
+      emailVerified: false,
+    });
+    console.log('[register] Firebase Auth: تم إنشاء المستخدم', email);
+  } catch (e) {
+    if (e.code === 'auth/email-already-exists') {
+      console.log('[register] Firebase Auth: البريد مسجل مسبقاً في Firebase — لا حاجة لإنشاء', email);
+      return;
+    }
+    console.warn('[register] Firebase Auth createUser فشل:', e.code || '', e.message);
+  }
+}
 
 const register = async (req, res) => {
   let connection;
@@ -18,13 +52,14 @@ const register = async (req, res) => {
       fullName, email, phone, password, role = 'driver',
       licenseNo = null, commercialNo = null, documentPath = null,
       issueDate = null, expiryDate = null,
-      truckType = null, plateNumber = null, isthimaraNo = null
+      truckType = null, plateNumber = null, isthimaraNo = null,
+      category = null, axle_count = null, body_type = null,
+      payload_capacity = null, max_weight_tons = null,
     } = req.body;
 
     const normalizedEmail = (email ?? '').toString().trim().toLowerCase();
     const normalizedPhone = (phone ?? '').toString().trim();
 
-    // Convert empty strings to null for database
     const finalIssueDate = (issueDate && issueDate.trim() !== '') ? issueDate : null;
     const finalExpiryDate = (expiryDate && expiryDate.trim() !== '') ? expiryDate : null;
 
@@ -34,8 +69,19 @@ const register = async (req, res) => {
       return res.status(400).json({ message: 'البيانات الأساسية غير مكتملة' });
     }
 
-    if (role === 'driver' && (!licenseNo || !truckType || !plateNumber || !isthimaraNo)) {
-      return res.status(400).json({ message: 'بيانات السائق والشاحنة غير مكتملة' });
+    let driverTruckClassification = null;
+    if (role === 'driver') {
+      if (!licenseNo || !plateNumber || !isthimaraNo) {
+        return res.status(400).json({ message: 'بيانات السائق والشاحنة غير مكتملة' });
+      }
+      const classificationResult = validateTruckClassification(req.body, { requireAll: true });
+      if (!classificationResult.ok) {
+        return res.status(400).json({
+          message: classificationResult.errors[0] || 'تصنيف الشاحنة غير صالح',
+          errors: classificationResult.errors,
+        });
+      }
+      driverTruckClassification = classificationResult.data;
     }
 
     const [phoneUsed, emailUsed] = await Promise.all([
@@ -61,27 +107,44 @@ const register = async (req, res) => {
 
     await connection.execute('INSERT INTO wallets (user_id, current_balance) VALUES (?, ?)', [userId, 0]);
 
-    if (role === 'driver') {
+    if (role === 'driver' && driverTruckClassification) {
+      await ensureTruckClassificationSchema();
       const now = new Date();
+      const c = driverTruckClassification;
       await connection.execute(
-        'INSERT INTO trucks (user_id, plate_number, isthimara_no, truck_type, capacity_kg, manufacturing_year, insurance_expiry_date, verification_status, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [userId, plateNumber.trim(), encryptText(isthimaraNo.trim()), truckType.trim(), 0, now.getFullYear(), new Date(now.getFullYear() + 1, now.getMonth(), now.getDate()).toISOString().split('T')[0], 'pending', 1]
+        `INSERT INTO trucks (
+           user_id, plate_number, isthimara_no, truck_type,
+           category, axle_count, body_type, payload_capacity, max_weight_tons,
+           capacity_kg, manufacturing_year, insurance_expiry_date, verification_status, is_active
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          userId,
+          plateNumber.trim(),
+          encryptText(isthimaraNo.trim()),
+          c.truck_type,
+          c.category,
+          c.axle_count,
+          c.body_type,
+          c.payload_capacity,
+          c.max_weight_tons,
+          c.capacity_kg,
+          now.getFullYear(),
+          new Date(now.getFullYear() + 1, now.getMonth(), now.getDate()).toISOString().split('T')[0],
+          'pending',
+          1,
+        ]
       );
     }
 
-    // Insert into compliance_documents table
     if (documentPath) {
       const docType = role === 'driver' ? 'driver_license' : 'commercial_registration';
       const safeExpiryDate = finalExpiryDate || '2099-12-31';
 
-      // التأكد من حفظ المسار (Key) فقط وليس الرابط الكامل
-      // إذا كان documentPath يحتوي على http، سنحاول استخراج الـ Key منه
       let storageKey = documentPath;
       if (documentPath.includes('http')) {
         try {
           const urlParts = new URL(documentPath);
           const pathSegments = urlParts.pathname.split('/');
-          // تخطي أول جزئين (السلاش واسم الباكت) للحصول على المسار
           storageKey = pathSegments.slice(2).join('/');
         } catch (e) {
           console.error("Error parsing document URL, saving as is:", e);
@@ -96,8 +159,15 @@ const register = async (req, res) => {
 
     await connection.commit();
 
+    await ensureFirebaseAuthUserForRegistration(normalizedEmail, password);
+
+    emitAdminDashboard(req, 'user.registered', { userId, role });
     const token = jwt.sign({ id: userId, role }, JWT_SECRET, { expiresIn: '30d' });
-    res.status(201).json({ success: true, user: { id: userId, role }, token });
+    res.status(201).json({
+      success: true,
+      user: { id: userId, role, verification_status: 'pending' },
+      token,
+    });
   } catch (error) {
     if (connection) await connection.rollback();
     console.error('[register] Error:', error);
@@ -121,10 +191,109 @@ const login = async (req, res) => {
       return res.status(403).json({ message: 'تم تعطيل هذا الحساب. تواصل مع الدعم.' });
     }
 
+    const profileImageUrl = user.profile_image_url ? await resolveProfileImage(user.profile_image_url) : null;
     const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
-    res.json({ success: true, user: { id: user.id, role: user.role, full_name: user.full_name, email: user.email, phone: user.phone }, token });
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        role: user.role,
+        full_name: user.full_name,
+        email: user.email,
+        phone: user.phone,
+        verification_status: user.verification_status || 'pending',
+        profile_image_url: profileImageUrl,
+        profileImageUrl,
+        profileImageKey: user.profile_image_url || null,
+      },
+      token,
+    });
   } catch (error) {
     res.status(500).json({ message: 'خطأ في تسجيل الدخول' });
+  }
+};
+
+/**
+ * تسجيل دخول التطبيق بعد نجاح FirebaseAuth (مثلاً بعد إعادة تعيين كلمة المرور في Firebase).
+ * يتحقق من idToken عبر firebase-admin، يطابق البريد مع جدول users، ويُصدِر نفس JWT الحالي.
+ * إذا وُجدت كلمة مرور في الطلب تُحدَّث في MySQL (مزامنة مع كلمة مرور Firebase بعد إعادة التعيين).
+ */
+const loginWithFirebase = async (req, res) => {
+  try {
+    const idToken = (req.body.idToken || '').toString().trim();
+    const password = (req.body.password || '').toString();
+
+    if (!idToken) {
+      return res.status(400).json({ message: 'رمز المصادقة مطلوب' });
+    }
+
+    const admin = getFirebaseAdminApp();
+    if (!admin) {
+      return res.status(503).json({
+        message: 'خدمة تسجيل الدخول غير متاحة مؤقتاً. حاول لاحقاً.',
+      });
+    }
+
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    const email = (decoded.email || '').toString().trim().toLowerCase();
+    if (!email) {
+      return res.status(400).json({
+        message: 'تعذّر التحقق من الحساب. استخدم بريداً إلكترونياً مسجّلاً.',
+      });
+    }
+
+    const user = await User.findByEmail(email);
+    if (!user) {
+      return res.status(404).json({
+        message: 'لا يوجد حساب مسجّل بهذا البريد. أنشئ الحساب من التطبيق أولاً.',
+      });
+    }
+
+    if (user.is_active === 0 || user.is_active === false) {
+      return res.status(403).json({ message: 'تم تعطيل هذا الحساب. تواصل مع الدعم.' });
+    }
+
+    if (password) {
+      if (
+        password.length < 8 ||
+        password.length > 128 ||
+        !/\p{L}/u.test(password) ||
+        !/[0-9]/.test(password)
+      ) {
+        return res.status(400).json({
+          message: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل وتحتوي على حرف ورقم',
+        });
+      }
+      const hashedPassword = await bcrypt.hash(password, 12);
+      await pool.execute('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, user.id]);
+    }
+
+    const profileImageUrl = user.profile_image_url ? await resolveProfileImage(user.profile_image_url) : null;
+    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        role: user.role,
+        full_name: user.full_name,
+        email: user.email,
+        phone: user.phone,
+        verification_status: user.verification_status || 'pending',
+        profile_image_url: profileImageUrl,
+        profileImageUrl,
+        profileImageKey: user.profile_image_url || null,
+      },
+      token,
+    });
+  } catch (error) {
+    console.error('[loginWithFirebase]', error.code || '', error.message);
+    if (error.code === 'auth/id-token-expired') {
+      return res.status(401).json({ message: 'انتهت صلاحية الجلسة. أعد المحاولة.' });
+    }
+    if (error.code === 'auth/argument-error' || error.code === 'auth/invalid-id-token') {
+      return res.status(401).json({ message: 'رمز الدخول غير صالح' });
+    }
+    return res.status(500).json({ message: 'تعذّر تسجيل الدخول' });
   }
 };
 
@@ -152,13 +321,19 @@ const updateProfile = async (req, res) => {
   try {
     const { id } = req.params;
     const { fullName, email, phone, licenseNo, commercialNo } = req.body;
+    if (req.user && Number(req.user.id) !== Number(id) && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'غير مصرح بتعديل هذا الحساب' });
+    }
     const encryptedLicenseNo = licenseNo ? encryptText(licenseNo) : null;
     const encryptedCommercialNo = commercialNo ? encryptText(commercialNo) : null;
 
-    await pool.execute(
-      'UPDATE users SET full_name = ?, email = ?, phone = ?, license_no = ?, commercial_no = ? WHERE id = ?',
-      [fullName, email, phone, encryptedLicenseNo, encryptedCommercialNo, id]
-    );
+    await User.updateProfileFields(id, {
+      fullName,
+      email,
+      phone,
+      licenseNo: encryptedLicenseNo,
+      commercialNo: encryptedCommercialNo,
+    });
     res.json({ message: 'تم التحديث بنجاح' });
   } catch (error) {
     res.status(500).json({ message: 'خطأ في التحديث' });
@@ -168,44 +343,9 @@ const updateProfile = async (req, res) => {
 const getProfile = async (req, res) => {
   try {
     const { id } = req.params;
-    const user = await User.findById(id);
-    if (!user) return res.status(404).json({ message: 'غير موجود' });
-
-    const licenseNo = user.license_no ? decryptText(user.license_no) : null;
-    const commercialNo = user.commercial_no ? decryptText(user.commercial_no) : null;
-
-    let stats = {};
-    if (user.role === 'driver') {
-      const tripStats = await Shipment.getDriverStats(id);
-      stats = { completed_trips: tripStats.completed_trips, total_earnings: tripStats.total_earnings };
-    } else if (user.role === 'shipper') {
-      const shipperStats = await Shipment.getShipperStats(id);
-      stats = {
-        total_shipments: shipperStats.total_shipments,
-        delivered_shipments: shipperStats.delivered_shipments,
-        active_shipments: shipperStats.active_shipments,
-      };
-    }
-
-    let ratingBlock = {};
-    try {
-      const avg = await Rating.getAverageRating(id);
-      ratingBlock = {
-        average_rating: avg.average_rating != null ? Number(avg.average_rating).toFixed(2) : '0.00',
-        ratings_total: avg.total_ratings || 0,
-        rating: avg.average_rating != null ? Number(avg.average_rating).toFixed(2) : '0.00',
-      };
-    } catch (_) {
-      ratingBlock = { average_rating: '0.00', ratings_total: 0, rating: '0.00' };
-    }
-
-    res.json({
-      ...user,
-      license_no: licenseNo,
-      commercial_no: commercialNo,
-      ...stats,
-      ...ratingBlock,
-    });
+    const profile = await buildProfileResponse(id);
+    if (!profile) return res.status(404).json({ message: 'غير موجود' });
+    res.json(profile);
   } catch (error) {
     res.status(500).json({ message: 'خطأ في جلب البيانات' });
   }
@@ -227,9 +367,100 @@ const updateDeviceToken = async (req, res) => {
   }
 };
 
+/** حد أقصى بسيط لطلبات إعادة التعيين لكل IP (ساعة) لمنع الإساءة */
+const passwordResetIpHits = new Map();
+const PASSWORD_RESET_WINDOW_MS = 60 * 60 * 1000;
+const PASSWORD_RESET_MAX_PER_IP = 25;
+
+function allowPasswordResetFromIp(ip) {
+  const now = Date.now();
+  const key = String(ip || 'unknown');
+  let arr = passwordResetIpHits.get(key) || [];
+  arr = arr.filter((t) => now - t < PASSWORD_RESET_WINDOW_MS);
+  if (arr.length >= PASSWORD_RESET_MAX_PER_IP) return false;
+  arr.push(now);
+  passwordResetIpHits.set(key, arr);
+  return true;
+}
+
+/**
+ * طلب إعادة تعيين كلمة المرور عبر Firebase:
+ * 1) التحقق من وجود المستخدم في Firebase Auth (Admin).
+ * 2) استدعاء REST الرسمي accounts:sendOobCode (نفس مسار الـ SDK) مع تسجيل الرد في السجل لتسهيل التشخيص.
+ */
+const requestFirebasePasswordReset = async (req, res) => {
+  try {
+    const emailRaw = (req.body?.email ?? '').toString().trim().toLowerCase();
+    if (!emailRaw || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailRaw)) {
+      return res.status(400).json({ success: false, message: 'البريد غير صالح' });
+    }
+    if (!allowPasswordResetFromIp(req.ip)) {
+      return res.status(429).json({ success: false, message: 'طلبات كثيرة، حاول لاحقاً' });
+    }
+
+    const adminApp = getFirebaseAdminApp();
+    if (!adminApp) {
+      return res.status(503).json({
+        success: false,
+        message: 'خدمة إعادة تعيين كلمة المرور غير متاحة مؤقتاً.',
+      });
+    }
+
+    try {
+      await adminApp.auth().getUserByEmail(emailRaw);
+    } catch (e) {
+      if (e.code === 'auth/user-not-found') {
+        return res.status(404).json({ success: false, message: 'لا يوجد حساب بهذا البريد.' });
+      }
+      throw e;
+    }
+
+    const apiKey = process.env.FIREBASE_WEB_API_KEY;
+    if (!apiKey || !String(apiKey).trim()) {
+      return res.status(503).json({
+        success: false,
+        message: 'خدمة إعادة تعيين كلمة المرور غير متاحة مؤقتاً.',
+      });
+    }
+
+    const url = `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(apiKey.trim())}`;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept-Language': 'ar',
+      },
+      body: JSON.stringify({
+        requestType: 'PASSWORD_RESET',
+        email: emailRaw,
+      }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const errMsg = (data.error && data.error.message) ? String(data.error.message) : '';
+      console.warn('[password-reset-request] sendOobCode failed', r.status, errMsg, JSON.stringify(data).slice(0, 500));
+      if (errMsg.includes('EMAIL_NOT_FOUND') || errMsg.includes('USER_NOT_FOUND')) {
+        return res.status(404).json({ success: false, message: 'لا يوجد حساب بهذا البريد.' });
+      }
+      return res.status(502).json({
+        success: false,
+        message: 'تعذّر إرسال رابط إعادة التعيين حالياً. حاول لاحقاً.',
+      });
+    }
+
+    console.log('[password-reset-request] sendOobCode OK', emailRaw);
+    return res.json({ success: true, message: 'تم الطلب.' });
+  } catch (e) {
+    console.error('[password-reset-request]', e);
+    return res.status(500).json({ success: false, message: 'خطأ في الخادم' });
+  }
+};
+
 module.exports = {
   register,
   login,
+  loginWithFirebase,
+  requestFirebasePasswordReset,
   getPendingUsers,
   setUserVerification,
   updateProfile,

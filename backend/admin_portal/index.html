@@ -3,70 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Darbak Pro | لوحة التحكم المتطورة</title>
+    <title>Darbak | لوحة التحكم </title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Kufi+Arabic:wght@300;400;700;900&display=swap" rel="stylesheet">
+    <script src="https://cdn.socket.io/4.8.3/socket.io.min.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" crossorigin="anonymous"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Arabic:wght@400;600;700;800&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
             theme: {
                 extend: {
                     colors: {
-                        primary: { DEFAULT: '#088A3B', 50: '#E8F5E9', 100: '#C8E6C9', 400: '#66BB6A', 500: '#4CAF50', 600: '#43A047' },
-                        darbak: { dark: '#1A1A1A', gold: '#FFD700', gray: '#F4F4F4' }
+                        primary: { DEFAULT: '#168A57', green: '#088A3B', dark: '#0E6D44' },
+                        darbak: {
+                            dark: '#222831',
+                            text: '#1B1F24',
+                            surface: '#F5F7FA',
+                            border: '#E6E9EF',
+                            muted: '#6B7280',
+                            sub: '#777777',
+                            danger: '#D94C4C',
+                            orange: '#F59E0B',
+                            'light-green': '#E9F8F0',
+                            success: '#79C96B',
+                        },
                     },
-                    fontFamily: { sans: ['Noto Kufi Arabic', 'sans-serif'] }
-                }
-            }
+                    fontFamily: { sans: ['"Noto Sans Arabic"', 'system-ui', 'sans-serif'] },
+                },
+            },
         }
     </script>
     <style>
-        body { background-color: #F8FAFC; color: #1E293B; }
-        .sidebar { width: 280px; height: 100vh; position: fixed; right: 0; top: 0; background: #FFF; z-index: 50; border-left: 1px solid #E2E8F0; }
-        .main-content { margin-right: 280px; min-height: 100vh; }
-        .nav-link { display: flex; align-items: center; gap: 12px; padding: 12px 24px; color: #64748B; font-weight: 600; transition: all 0.2s; cursor: pointer; border-radius: 12px; margin: 4px 16px; }
-        .nav-link:hover { background: #F1F5F9; color: #088A3B; }
-        .nav-link.active { background: #E8F5E9; color: #088A3B; border-right: 4px solid #088A3B; }
-        .card { background: white; border-radius: 20px; box-shadow: 0 4px 20px -5px rgba(0,0,0,0.05); border: 1px solid #F1F5F9; transition: transform 0.2s; }
-        .card:hover { transform: translateY(-2px); }
-        .pulse-dot { width: 8px; height: 8px; background: #10B981; border-radius: 50%; position: relative; }
+        body { background-color: #F5F7FA; color: #1B1F24; }
+        .sidebar { width: 270px; height: 100vh; position: fixed; right: 0; top: 0; background: #222831; z-index: 50; border-left: 1px solid rgba(255,255,255,0.06); box-shadow: -4px 0 24px rgba(0,0,0,0.15); }
+        .main-content { margin-right: 270px; min-height: 100vh; background: #F5F7FA; }
+        .nav-link { display: flex; align-items: center; gap: 12px; padding: 11px 20px; color: #b8bcc4; font-weight: 600; transition: all 0.2s; cursor: pointer; border-radius: 10px; margin: 3px 12px; font-size: 13px; }
+        .nav-link:hover { background: rgba(22, 138, 87, 0.12); color: #fff; }
+        .nav-link.active { background: linear-gradient(90deg, rgba(22,138,87,0.35), rgba(8,138,59,0.08)); color: #E9F8F0; border-right: 3px solid #088A3B; }
+        .nav-section-title { padding: 8px 20px 4px; font-size: 10px; font-weight: 800; letter-spacing: 0.06em; color: #6B7280; text-transform: uppercase; }
+        .card { background: #fff; border-radius: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #E6E9EF; transition: box-shadow 0.2s, transform 0.2s; }
+        .card:hover { box-shadow: 0 8px 28px -10px rgba(22, 138, 87, 0.12); transform: translateY(-1px); }
+        .pulse-dot { width: 8px; height: 8px; background: #088A3B; border-radius: 50%; position: relative; }
         .pulse-dot::after { content: ''; position: absolute; width: 100%; height: 100%; background: inherit; border-radius: inherit; animation: pulse 2s infinite; }
         @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(3); opacity: 0; } }
-        .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; backdrop-filter: blur(8px); }
+        .modal { display: none; position: fixed; inset: 0; background: rgba(27,31,36,0.65); z-index: 1000; backdrop-filter: blur(8px); }
         .modal-content { background: white; width: 95%; max-width: 900px; margin: 30px auto; border-radius: 24px; overflow: hidden; display: flex; flex-direction: column; max-height: 90vh; min-height: 0; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
         #activity-feed { -webkit-overflow-scrolling: touch; }
+        #sniffer-table-wrap::-webkit-scrollbar { height: 8px; width: 8px; }
+        #sniffer-table-wrap::-webkit-scrollbar-thumb { background: #168A57; border-radius: 4px; }
+        .stat-delta-up { color: #168A57; font-weight: 800; font-size: 10px; }
+        .stat-delta-down { color: #D94C4C; font-weight: 800; font-size: 10px; }
+        .stat-delta-flat { color: #6B7280; font-weight: 600; font-size: 10px; }
+        .admin-search-input::placeholder { color: #777777; }
     </style>
 </head>
 <body class="antialiased font-sans">
-    <!-- Sidebar -->
-    <aside class="sidebar shadow-sm">
-        <div class="p-8 flex items-center gap-4 border-b mb-6">
-            <div class="w-14 h-14 bg-white rounded-2xl flex items-center justify-center overflow-hidden border-2 border-slate-50 shadow-md">
-                <img src="/assets/animations/assets-logo.jpeg" class="w-full h-full object-cover" alt="Logo" onerror="this.src='https://ui-avatars.com/api/?name=D&background=088A3B&color=fff'">
+    <!-- Sidebar (TailAdmin-inspired dark rail) -->
+    <aside class="sidebar flex flex-col">
+        <div class="p-6 flex items-center gap-3 border-b border-white/10">
+            <div class="w-12 h-12 bg-[#2d333b] rounded-xl flex items-center justify-center overflow-hidden ring-2 ring-primary/50">
+                <img src="/assets/animations/assets-logo.jpeg" class="w-full h-full object-cover" alt="" onerror="this.src='https://ui-avatars.com/api/?name=D&background=088A3B&color=fff'">
             </div>
             <div>
-                <span class="text-2xl font-black tracking-tighter text-slate-800 block">دربك</span>
-                <span class="text-[10px] font-bold text-primary uppercase tracking-widest">نظام الإدارة</span>
+                <span class="text-lg font-black text-white tracking-tight block">دربك برو</span>
+                <span class="text-[10px] font-bold text-darbak-light-green uppercase tracking-wider">لوحة الإدارة</span>
             </div>
         </div>
-        <nav class="space-y-1">
-            <p class="px-8 text-[10px] font-bold text-slate-400 uppercase mb-4 tracking-widest">الرئيسية</p>
-            <a onclick="showSection('dashboard')" class="nav-link active" id="nav-dashboard"><i class="fas fa-chart-pie"></i> نظرة عامة</a>
-            <a onclick="showSection('users')" class="nav-link" id="nav-users"><i class="fas fa-user-friends"></i> إدارة المستخدمين</a>
-            <a onclick="showSection('shipments')" class="nav-link" id="nav-shipments"><i class="fas fa-truck-loading"></i> متابعة الشحنات</a>
-            <a onclick="showSection('financials')" class="nav-link" id="nav-financials"><i class="fas fa-wallet"></i> المالية والجزاءات</a>
-
-            <p class="px-8 text-[10px] font-bold text-slate-400 uppercase mt-8 mb-4 tracking-widest">الدعم والتحكم</p>
-            <a onclick="showSection('settings')" class="nav-link" id="nav-settings"><i class="fas fa-sliders"></i> الإعدادات</a>
-            <button id="logout-btn" class="nav-link text-rose-500 w-[calc(100%-32px)] mt-4"><i class="fas fa-power-off"></i> خروج آمن</button>
+        <nav class="flex-1 overflow-y-auto py-4 space-y-1">
+            <p class="nav-section-title">القائمة</p>
+            <a onclick="showSection('dashboard')" class="nav-link active" id="nav-dashboard"><i class="fas fa-chart-line w-5 text-center text-darbak-muted"></i> نظرة عامة</a>
+            <a onclick="showSection('users')" class="nav-link" id="nav-users"><i class="fas fa-user-friends w-5 text-center text-darbak-muted"></i> المستخدمون</a>
+            <a onclick="showSection('shipments')" class="nav-link" id="nav-shipments"><i class="fas fa-truck-loading w-5 text-center text-darbak-muted"></i> الشحنات</a>
+            <p class="nav-section-title pt-6">المراقبة</p>
+            <a onclick="showSection('sniffer')" class="nav-link" id="nav-sniffer"><i class="fas fa-satellite-dish w-5 text-center text-darbak-orange"></i>النظام</a>
+            <p class="nav-section-title pt-6">الجلسة</p>
+            <button type="button" id="logout-btn" class="nav-link text-darbak-danger hover:bg-white/5 w-[calc(100%-24px)]"><i class="fas fa-power-off w-5 text-center"></i> خروج آمن</button>
         </nav>
     </aside>
 
     <!-- Login -->
-    <div id="login-screen" class="min-h-screen flex items-center justify-center bg-slate-100 fixed inset-0 z-[3000]">
-        <div class="bg-white p-12 rounded-[40px] shadow-2xl w-full max-w-md border border-slate-200">
+    <div id="login-screen" class="min-h-screen flex items-center justify-center bg-darbak-surface fixed inset-0 z-[3000]">
+        <div class="bg-white p-12 rounded-[40px] shadow-2xl w-full max-w-md border border-darbak-border">
             <div class="text-center mb-10">
                 <img src="/assets/animations/assets-logo.jpeg" class="w-24 h-24 mx-auto rounded-3xl shadow-lg mb-6 object-cover">
                 <h1 class="text-3xl font-black text-slate-800">مرحباً بك مجدداً</h1>
@@ -83,35 +102,46 @@
 
     <!-- Main Content -->
     <main class="main-content">
-        <header class="bg-white/80 backdrop-blur-md sticky top-0 z-40 border-b border-slate-100 px-10 py-6 flex justify-between items-center">
-            <div>
-                <h2 id="section-title" class="font-black text-2xl text-slate-800">لوحة التحكم</h2>
-                <div class="flex items-center gap-2 text-slate-400 text-xs mt-1">
+        <header class="bg-white sticky top-0 z-40 border-b border-darbak-border shadow-sm px-4 sm:px-6 lg:px-8 py-4 flex flex-wrap items-center gap-4">
+            <div class="min-w-0 flex-shrink">
+                <h2 id="section-title" class="font-black text-xl sm:text-2xl text-darbak-text tracking-tight">لوحة التحكم</h2>
+                <div class="flex items-center gap-2 text-darbak-muted text-[11px] mt-0.5 flex-wrap">
                     <span id="current-date"></span>
-                    <span class="w-1 h-1 bg-slate-300 rounded-full"></span>
-                    <span id="server-status" class="flex items-center gap-1"><span class="pulse-dot"></span> متصل بالسيرفر</span>
+                    <span class="w-1 h-1 bg-slate-300 rounded-full hidden sm:inline"></span>
+                    <span id="server-status" class="flex items-center gap-2 flex-wrap">
+                        <span id="admin-live-dot" class="pulse-dot shrink-0"></span>
+                        <span id="admin-connection-label" class="text-primary font-bold">جاري الاتصال…</span>
+                        <span class="admin-socket-badge text-[9px] font-black px-2 py-0.5 rounded-full bg-darbak-light-green text-primary-dark hidden sm:inline-block">…</span>
+                        <span id="admin-last-socket-reason" class="text-darbak-muted font-normal hidden lg:inline max-w-[220px] truncate" title=""></span>
+                    </span>
                 </div>
             </div>
-            <div class="flex items-center gap-4">
+            <div class="flex-1 min-w-[200px] max-w-xl mx-auto order-last lg:order-none w-full lg:w-auto">
                 <div class="relative">
-                    <button type="button" id="notif-toggle" onclick="toggleNotifPanel()" class="relative w-12 h-12 rounded-2xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-200 transition">
+                    <i class="fas fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none"></i>
+                    <input type="search" id="admin-global-search" class="admin-search-input w-full pl-4 pr-10 py-2.5 rounded-xl border border-darbak-border bg-darbak-surface text-sm text-darbak-text outline-none focus:border-primary focus:ring-1 focus:ring-primary/25 transition" placeholder="بحث في السجل ( — السبب أو JSON)…" autocomplete="off">
+                </div>
+            </div>
+            <div class="flex items-center gap-2 sm:gap-3 mr-auto">
+                <div class="relative">
+                    <button type="button" id="notif-toggle" onclick="toggleNotifPanel()" class="relative w-11 h-11 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-200 transition">
                         <i class="fas fa-bell"></i>
-                        <span id="notif-badge" class="hidden absolute -top-1 -left-1 min-w-[20px] h-5 px-1 bg-rose-500 text-white text-[10px] font-black rounded-full flex items-center justify-center">0</span>
+                        <span id="notif-badge" class="hidden absolute -top-0.5 -left-0.5 min-w-[18px] h-[18px] px-0.5 bg-rose-500 text-white text-[9px] font-black rounded-full flex items-center justify-center">0</span>
                     </button>
-                    <div id="notif-panel" class="hidden absolute left-0 mt-2 w-96 max-h-[420px] overflow-y-auto bg-white rounded-2xl shadow-2xl border border-slate-100 z-50">
+                    <div id="notif-panel" class="hidden absolute left-0 mt-2 w-[min(100vw-2rem,22rem)] max-h-[420px] overflow-y-auto bg-white rounded-2xl shadow-2xl border border-slate-100 z-50">
                         <div class="p-4 border-b flex justify-between items-center sticky top-0 bg-white">
-                            <span class="font-black text-sm text-slate-800">مركز الإشعارات</span>
-                            <button type="button" onclick="markAllNotifsRead()" class="text-[10px] font-bold text-primary hover:underline">تعليم الكل كمقروء</button>
+                            <span class="font-black text-sm text-slate-800">الإشعارات</span>
+                            <button type="button" onclick="markAllNotifsRead()" class="text-[10px] font-bold text-primary hover:underline">تعليم الكل</button>
                         </div>
                         <div id="notif-list" class="divide-y divide-slate-50"></div>
                     </div>
                 </div>
-                <div class="flex items-center gap-4 bg-slate-100 p-2 pr-5 rounded-2xl border border-slate-200">
-                    <div class="text-right">
-                        <p class="text-sm font-black text-slate-800">مدير النظام</p>
-                        <span class="text-[9px] text-emerald-600 font-bold">بصلاحيات كاملة</span>
+                <div class="flex items-center gap-3 bg-darbak-dark text-white pl-2 pr-3 py-1.5 rounded-xl border border-white/10">
+                    <div class="text-right hidden sm:block">
+                        <p class="text-xs font-black leading-tight">مدير</p>
+                        <span class="text-[9px] text-primary font-bold">صلاحيات كاملة</span>
                     </div>
-                    <div class="w-10 h-10 bg-primary rounded-xl flex items-center justify-center text-white font-black">AD</div>
+                    <div class="w-9 h-9 bg-primary rounded-lg flex items-center justify-center text-xs font-black">AD</div>
                 </div>
             </div>
         </header>
@@ -120,23 +150,26 @@
             <!-- Dashboard View -->
             <div id="dashboard-section" class="section-content">
                 <!-- Summary metrics -->
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
                     <div class="card p-6 border-l-4 border-l-emerald-500">
                         <div class="w-11 h-11 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600 text-lg mb-3"><i class="fas fa-users"></i></div>
                         <p class="text-slate-400 font-bold text-[10px] uppercase tracking-wider">إجمالي المستخدمين</p>
                         <h2 id="total-users" class="text-2xl font-black text-slate-800 mt-1">0</h2>
-                        <p class="text-[10px] text-slate-500 mt-2 font-bold leading-relaxed"><span id="stat-drivers">0</span> سائق · <span id="stat-companies">0</span> شركة</p>
+                        <p id="delta-total-users" class="stat-delta-flat mt-1 min-h-[14px]"></p>
+                        <p class="text-[10px] text-slate-500 mt-1 font-bold leading-relaxed"><span id="stat-drivers">0</span> سائق · <span id="stat-companies">0</span> شركة</p>
                     </div>
                     <div class="card p-6 border-l-4 border-l-blue-500">
                         <div class="w-11 h-11 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600 text-lg mb-3"><i class="fas fa-route"></i></div>
                         <p class="text-slate-400 font-bold text-[10px] uppercase tracking-wider">رحلات نشطة</p>
                         <h2 id="active-shipments" class="text-2xl font-black text-slate-800 mt-1">0</h2>
+                        <p id="delta-active-shipments" class="stat-delta-flat mt-1 min-h-[14px]"></p>
                         <p class="text-[10px] text-slate-400 mt-2">معيّنة أو قيد التنفيذ</p>
                     </div>
                     <div class="card p-6 border-l-4 border-l-indigo-500">
                         <div class="w-11 h-11 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600 text-lg mb-3"><i class="fas fa-flag-checkered"></i></div>
                         <p class="text-slate-400 font-bold text-[10px] uppercase tracking-wider">رحلات مكتملة</p>
                         <h2 id="completed-trips-stat" class="text-2xl font-black text-slate-800 mt-1">0</h2>
+                        <p id="delta-completed-trips" class="stat-delta-flat mt-1 min-h-[14px]"></p>
                     </div>
                     <div class="card p-6 border-l-4 border-l-rose-500">
                         <div class="flex justify-between items-start mb-3">
@@ -145,18 +178,43 @@
                         </div>
                         <p class="text-slate-400 font-bold text-[10px] uppercase tracking-wider">توثيق معلق</p>
                         <h2 id="pending-count-stat" class="text-2xl font-black text-rose-600 mt-1">0</h2>
-                    </div>
-                    <div class="card p-6 border-l-4 border-l-teal-500">
-                        <div class="w-11 h-11 bg-teal-50 rounded-xl flex items-center justify-center text-teal-600 text-lg mb-3"><i class="fas fa-coins"></i></div>
-                        <p class="text-slate-400 font-bold text-[10px] uppercase tracking-wider">إجمالي الإيرادات</p>
-                        <h2 id="revenue-stat" class="text-2xl font-black text-teal-700 mt-1">0</h2>
-                        <p class="text-[10px] text-slate-400 mt-2">من الشحنات المكتملة</p>
+                        <p id="delta-pending-docs" class="stat-delta-flat mt-1 min-h-[14px]"></p>
                     </div>
                     <div class="card p-6 border-l-4 border-l-amber-500">
-                        <div class="w-11 h-11 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 text-lg mb-3"><i class="fas fa-gavel"></i></div>
-                        <p class="text-slate-400 font-bold text-[10px] uppercase tracking-wider">تظلمات مفتوحة</p>
-                        <h2 id="open-disputes-stat" class="text-2xl font-black text-amber-700 mt-1">0</h2>
-                        <p class="text-[10px] text-slate-400 mt-2">مزايدات معلقة: <span id="active-bids" class="font-black text-slate-600">0</span></p>
+                        <div class="w-11 h-11 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600 text-lg mb-3"><i class="fas fa-hand-holding-dollar"></i></div>
+                        <p class="text-slate-400 font-bold text-[10px] uppercase tracking-wider">عروض أسعار معلقة</p>
+                        <h2 id="active-bids" class="text-2xl font-black text-slate-800 mt-1">0</h2>
+                        <p class="text-[10px] text-slate-400 mt-2">في انتظار قرار الشاحن</p>
+                    </div>
+                    <div class="card p-6 border-l-4 border-l-primary-green">
+                        <div class="w-11 h-11 bg-darbak-light-green rounded-xl flex items-center justify-center text-primary-dark text-lg mb-3"><i class="fas fa-coins"></i></div>
+                        <p class="text-darbak-muted font-bold text-[10px] uppercase tracking-wider">إيراد مُحصّل (تسليمات)</p>
+                        <h2 id="revenue-stat" class="text-2xl font-black text-primary mt-1">0</h2>
+                        <p class="text-[10px] text-darbak-muted mt-2">مجموع أسعار الشحنات المكتملة</p>
+                    </div>
+                </div>
+
+                <!-- Charts (TailAdmin-style) -->
+                <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mt-8">
+                    <div class="card p-6">
+                        <div class="flex justify-between items-start mb-4">
+                            <div>
+                                <h3 class="font-black text-slate-900 text-sm">شحنات جديدة</h3>
+                                <p class="text-[10px] text-slate-500 mt-0.5">آخر 7 أيام</p>
+                            </div>
+                            <span class="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded-lg">يومي</span>
+                        </div>
+                        <div class="h-[220px]"><canvas id="chart-shipments"></canvas></div>
+                    </div>
+                    <div class="card p-6">
+                        <div class="flex justify-between items-start mb-4">
+                            <div>
+                                <h3 class="font-black text-slate-900 text-sm">عروض الأسعار</h3>
+                                <p class="text-[10px] text-slate-500 mt-0.5">آخر 7 أيام</p>
+                            </div>
+                            <span class="text-[10px] font-bold bg-primary/10 text-primary px-2 py-1 rounded-lg">مزايدات</span>
+                        </div>
+                        <div class="h-[220px]"><canvas id="chart-bids"></canvas></div>
                     </div>
                 </div>
 
@@ -210,7 +268,11 @@
                     <div class="lg:col-span-4 flex flex-col gap-8 min-w-0">
                         <div class="card flex-1 flex flex-col min-h-[500px] min-w-0 overflow-hidden">
                             <div class="px-6 py-5 border-b bg-slate-50/50 flex flex-wrap items-center justify-between gap-3">
-                                <h3 class="font-black text-slate-800 flex items-center gap-3"><i class="fas fa-bolt-lightning text-amber-500"></i> النبض الحي (Real-time)</h3>
+                                <h3 class="font-black text-slate-800 flex items-center gap-3 flex-wrap">
+                                    <i class="fas fa-bolt-lightning text-amber-500"></i>
+                                    <span> التطبيق</span>
+                                    <span class="admin-socket-badge text-[10px] font-black px-2.5 py-1 rounded-full bg-slate-200 text-slate-600">جاري ربط القناة…</span>
+                                </h3>
                             </div>
                             <p class="px-6 pt-3 text-[10px] text-slate-400 font-bold">آخر الأنشطة — مرّر للأسفل داخل الإطار</p>
                             <div id="activity-feed" class="flex-1 min-h-0 min-w-0 w-full flex flex-col gap-3 overflow-y-auto overflow-x-hidden p-4 pb-4 min-h-[220px] max-h-[380px]">
@@ -235,65 +297,31 @@
                 </div>
             </div>
 
-            <div id="financials-section" class="section-content hidden">
-                <div class="card overflow-hidden">
-                    <div class="p-8 border-b flex justify-between items-center bg-slate-50">
-                        <div>
-                            <h3 class="font-black text-2xl text-slate-800">المالية والتظلمات</h3>
-                            <p class="text-xs text-slate-500 mt-1">إدارة مديونيات السائقين ومراجعة طلبات الاعتراض على الجزاءات</p>
+            <div id="sniffer-section" class="section-content hidden">
+                <div class="card overflow-hidden border-2 border-slate-800 bg-slate-950 text-slate-100 shadow-xl">
+                    <div class="px-5 sm:px-8 py-6 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4 bg-slate-900">
+                        <div class="min-w-0">
+                            <h3 class="font-black text-white flex items-center gap-2 text-lg sm:text-xl"><i class="fas fa-satellite-dish text-amber-400"></i> النظام</h3>
+                            <p class="text-[11px] text-slate-400 mt-1 leading-relaxed max-w-2xl">كل أحداث التطبيق التي تبثها الباكند (شحنات، عروض، محادثات، تسجيلات، إدارة…). استخدم شريط البحث أعلاه لتصفية السبب أو محتوى JSON.</p>
                         </div>
-                        <div class="flex gap-4">
-                            <button onclick="loadDisputes()" class="bg-primary text-white px-6 py-2 rounded-xl font-bold text-sm hover:brightness-110 transition shadow-lg shadow-primary/20">تحديث البيانات</button>
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 p-8 bg-slate-50/50">
-                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                            <p class="text-[10px] font-bold text-slate-400 uppercase mb-1">إجمالي المديونيات</p>
-                            <h4 id="total-debt" class="text-2xl font-black text-rose-600">0 ريال</h4>
-                        </div>
-                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                            <p class="text-[10px] font-bold text-slate-400 uppercase mb-1">تظلمات قيد الانتظار</p>
-                            <h4 id="pending-disputes-count" class="text-2xl font-black text-amber-500">0</h4>
-                        </div>
-                        <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                            <p class="text-[10px] font-bold text-slate-400 uppercase mb-1">تحصيلات اليوم</p>
-                            <h4 class="text-2xl font-black text-emerald-600">0 ريال</h4>
+                        <div class="flex flex-wrap gap-2 items-center">
+                            <span class="text-[10px] font-mono bg-slate-800 px-2 py-1.5 rounded-lg text-emerald-400 border border-slate-700">سجلات: <b id="sniffer-live-count">0</b></span>
+                            <button type="button" onclick="toggleSnifferPause()" id="sniffer-pause-btn" class="text-xs font-black px-4 py-2 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition">إيقاف مؤقت</button>
+                            <button type="button" onclick="clearSnifferLog()" class="text-xs font-black px-4 py-2 rounded-xl bg-slate-800 text-slate-200 border border-slate-600 hover:bg-slate-700 transition">مسح</button>
+                            <button type="button" onclick="copySnifferLog()" class="text-xs font-black px-4 py-2 rounded-xl bg-primary text-white hover:brightness-110 transition">نسخ JSON</button>
                         </div>
                     </div>
-
-                    <div class="px-6 py-4 bg-white flex flex-wrap gap-3 border-b border-slate-100">
-                        <input type="text" id="disputes-search" placeholder="بحث سائق / رقم شحنة..." class="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary flex-1 min-w-[200px]">
-                        <select id="disputes-status" class="bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm outline-none focus:border-primary">
-                            <option value="">كل الحالات</option>
-                            <option value="open">مفتوح</option>
-                            <option value="approved">مقبول</option>
-                            <option value="rejected">مرفوض</option>
-                        </select>
-                        <button type="button" onclick="loadDisputes(1)" class="bg-slate-900 text-white px-5 py-2 rounded-xl text-xs font-black">تطبيق</button>
-                    </div>
-                    <div class="px-6 py-3 flex justify-between items-center bg-slate-50/50 text-[10px] text-slate-500 font-bold">
-                        <span id="disputes-page-meta"></span>
-                        <div class="flex gap-2">
-                            <button type="button" onclick="disputesPrev()" class="px-3 py-1 rounded-lg bg-white border border-slate-200">السابق</button>
-                            <button type="button" onclick="disputesNext()" class="px-3 py-1 rounded-lg bg-white border border-slate-200">التالي</button>
-                        </div>
-                    </div>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-right">
-                            <thead class="bg-slate-100/50">
-                                <tr class="text-[10px] font-black uppercase text-slate-500">
-                                    <th class="p-6">السائق</th>
-                                    <th class="p-6">نوع العملية</th>
-                                    <th class="p-6">قيمة الجزاء</th>
-                                    <th class="p-6">سبب التظلم</th>
-                                    <th class="p-6">التاريخ</th>
-                                    <th class="p-6 text-left">الإجراء</th>
+                    <div id="sniffer-table-wrap" class="overflow-auto max-h-[calc(100vh-200px)]">
+                        <table class="w-full text-right text-xs min-w-[640px]">
+                            <thead class="sticky top-0 bg-slate-900 text-slate-500 font-black uppercase text-[10px] border-b border-slate-800 z-10">
+                                <tr>
+                                    <th class="p-3 w-28">وقت</th>
+                                    <th class="p-3 w-40">السبب</th>
+                                    <th class="p-3">وصف عربي</th>
+                                    <th class="p-3 min-w-[220px]" dir="ltr">meta (JSON)</th>
                                 </tr>
                             </thead>
-                            <tbody id="disputes-body">
-                                <tr><td colspan="6" class="py-20 text-center text-slate-300 italic">بانتظار جلب البيانات...</td></tr>
-                            </tbody>
+                            <tbody id="sniffer-tbody" class="divide-y divide-slate-800/80"></tbody>
                         </table>
                     </div>
                 </div>
@@ -303,6 +331,9 @@
                 <div class="card overflow-hidden w-full max-w-none">
                     <div class="px-6 sm:px-8 py-6 bg-slate-800 text-white font-black text-right flex flex-col md:flex-row md:justify-between md:items-center gap-4">
                         <span>إدارة المستخدمين</span>
+                        <button type="button" onclick="openCreateUserModal()" class="inline-flex items-center justify-center gap-2 bg-primary text-white px-5 py-2.5 rounded-xl text-xs font-black hover:brightness-110 shadow-lg shadow-primary/20">
+                            <i class="fas fa-user-plus"></i> مستخدم جديد
+                        </button>
                     </div>
                     <div class="px-6 py-4 border-b bg-white flex flex-wrap gap-2 items-center">
                         <button type="button" onclick="setUserRoleTab('')" id="tab-users-all" class="user-role-tab px-4 py-2 rounded-xl text-xs font-black bg-primary text-white">الكل</button>
@@ -394,7 +425,7 @@
             <div id="settings-section" class="section-content hidden">
                 <div class="card p-10 max-w-3xl">
                     <h3 class="font-black text-2xl text-slate-800">الإعدادات</h3>
-                    <p class="text-sm text-slate-500 mt-3 leading-relaxed">حدود الأسعار والتصدير متاحة عبر مسارات API الحالية (<code class="bg-slate-100 px-2 py-0.5 rounded text-xs">GET/POST /api/admin/price-floors</code>، <code class="bg-slate-100 px-2 py-0.5 rounded text-xs">GET /api/admin/export-report</code>). تأكد من تشغيل ملف <code class="bg-slate-100 px-2 py-0.5 rounded text-xs">migrations_06_admin_dashboard.sql</code> لتفعيل التظلمات وتعطيل الحسابات وقراءة الإشعارات.</p>
+                    <p class="text-sm text-slate-500 mt-3 leading-relaxed">حدود الأسعار والتصدير متاحة عبر مسارات API الحالية (<code class="bg-slate-100 px-2 py-0.5 rounded text-xs">GET/POST /api/admin/price-floors</code>، <code class="bg-slate-100 px-2 py-0.5 rounded text-xs">GET /api/admin/export-report</code>). تأكد من تشغيل ملفات الـ migration المناسبة لتعطيل الحسابات وقراءة الإشعارات عند الحاجة.</p>
                 </div>
             </div>
         </div>
@@ -417,7 +448,7 @@
                 <!-- المحتوى يظهر هنا -->
             </div>
             <div class="p-6 bg-white border-t flex justify-between items-center">
-                <div class="text-xs text-slate-400 font-bold">الموقع الجغرافي للرفع: <span class="text-slate-600">الرياض، السعودية</span></div>
+                <div class="text-xs text-slate-400 font-bold">الموقع الجغرافي للرفع: <span class="text-slate-600">ليس موجود بعد </span></div>
                 <div class="flex gap-4">
                     <button onclick="closeModal()" class="px-8 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 transition">إغلاق</button>
                     <a id="download-link" href="#" target="_blank" class="bg-slate-800 text-white px-8 py-3 rounded-xl font-bold hover:bg-slate-700 transition flex items-center gap-2">
@@ -439,15 +470,254 @@
         </div>
     </div>
 
+    <!-- إنشاء / تعديل مستخدم (FR-6) -->
+    <div id="admin-user-form-modal" class="modal">
+        <div class="modal-content max-w-lg">
+            <div class="bg-slate-900 text-white p-6 flex justify-between items-center">
+                <h3 id="admin-user-form-title" class="font-black flex items-center gap-2"><i class="fas fa-user-plus text-primary"></i> مستخدم جديد</h3>
+                <button type="button" onclick="closeAdminUserFormModal()" class="w-10 h-10 hover:bg-white/10 rounded-xl text-xl">&times;</button>
+            </div>
+            <form id="admin-user-form" class="p-8 text-right space-y-4 max-h-[75vh] overflow-y-auto" onsubmit="submitAdminUserForm(event)">
+                <input type="hidden" id="au-user-id" value="">
+                <div>
+                    <label class="block text-[10px] font-black text-slate-400 mb-1">الاسم الكامل</label>
+                    <input type="text" id="au-full-name" required class="w-full p-3 rounded-xl border border-slate-200 outline-none focus:border-primary text-sm">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black text-slate-400 mb-1">البريد الإلكتروني</label>
+                    <input type="email" id="au-email" required class="w-full p-3 rounded-xl border border-slate-200 outline-none focus:border-primary text-sm" dir="ltr">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black text-slate-400 mb-1">الجوال</label>
+                    <input type="text" id="au-phone" required class="w-full p-3 rounded-xl border border-slate-200 outline-none focus:border-primary text-sm" dir="ltr">
+                </div>
+                <div id="au-password-wrap">
+                    <label class="block text-[10px] font-black text-slate-400 mb-1">كلمة المرور</label>
+                    <input type="password" id="au-password" class="w-full p-3 rounded-xl border border-slate-200 outline-none focus:border-primary text-sm" dir="ltr" autocomplete="new-password">
+                    <p id="au-password-hint" class="text-[10px] text-slate-400 mt-1">مطلوبة عند إنشاء حساب جديد</p>
+                </div>
+                <div id="au-role-wrap">
+                    <label class="block text-[10px] font-black text-slate-400 mb-1">الدور</label>
+                    <select id="au-role" class="w-full p-3 rounded-xl border border-slate-200 outline-none focus:border-primary text-sm bg-white">
+                        <option value="driver">سائق</option>
+                        <option value="shipper">شركة نقل</option>
+                    </select>
+                </div>
+                <div id="au-verification-wrap" class="hidden">
+                    <label class="block text-[10px] font-black text-slate-400 mb-1">حالة التوثيق</label>
+                    <select id="au-verification" class="w-full p-3 rounded-xl border border-slate-200 outline-none focus:border-primary text-sm bg-white">
+                        <option value="pending">معلق</option>
+                        <option value="verified">موثّق</option>
+                        <option value="rejected">مرفوض</option>
+                    </select>
+                </div>
+                <div class="flex gap-3 pt-4">
+                    <button type="button" onclick="closeAdminUserFormModal()" class="flex-1 py-3 rounded-xl border border-slate-200 font-bold text-slate-600 hover:bg-slate-50">إلغاء</button>
+                    <button type="submit" class="flex-1 py-3 rounded-xl bg-primary text-white font-black hover:brightness-110">حفظ</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         const API_URL = window.location.origin + '/api';
         let token = localStorage.getItem('darbak_admin_token');
+        let adminSocket = null;
+        let adminRefreshTimer = null;
+        let adminChartShip = null;
+        let adminChartBid = null;
+        const SNIFFER_MAX = 400;
+        let snifferPaused = false;
+        const snifferEntries = [];
+
+        const SOCKET_REASON_LABELS = {
+            'socket.connected': 'اتصال القناة المباشرة',
+            'shipment.created': 'شحنة جديدة',
+            'shipment.status': 'تحديث حالة شحنة',
+            'bid.created': 'عرض سعر جديد',
+            'bid.accepted': 'قبول عرض',
+            'user.registered': 'تسجيل مستخدم',
+            'rating.created': 'تقييم جديد',
+            'chat.message': 'رسالة في المحادثة',
+            'document.verified': 'قرار على مستند',
+            'admin.user_verified': 'توثيق مستخدم',
+            'admin.user_created': 'مستخدم جديد (إدارة)',
+            'admin.user_updated': 'تعديل مستخدم',
+            'admin.user_active': 'تفعيل / تعطيل',
+        };
+        function setSocketBadgesText(text) {
+            document.querySelectorAll('.admin-socket-badge').forEach((el) => {
+                el.textContent = text;
+            });
+        }
+
+        function styleSocketBadges(removeList, addList) {
+            document.querySelectorAll('.admin-socket-badge').forEach((b) => {
+                b.classList.remove(...removeList);
+                b.classList.add(...addList);
+            });
+        }
+
+        function pushSnifferEntry(payload) {
+            if (snifferPaused || !payload) return;
+            const row = {
+                reason: payload.reason || 'update',
+                meta: payload.meta && typeof payload.meta === 'object' ? payload.meta : {},
+                at: payload.at || new Date().toISOString(),
+                _rx: Date.now(),
+            };
+            snifferEntries.unshift(row);
+            if (snifferEntries.length > SNIFFER_MAX) snifferEntries.length = SNIFFER_MAX;
+            renderSnifferTable();
+            const c = document.getElementById('sniffer-live-count');
+            if (c) c.textContent = numsEn(snifferEntries.length);
+        }
+
+        function renderSnifferTable() {
+            const tbody = document.getElementById('sniffer-tbody');
+            if (!tbody) return;
+            const q = (document.getElementById('admin-global-search')?.value || '').trim().toLowerCase();
+            const rows = snifferEntries.filter((e) => {
+                if (!q) return true;
+                const blob = `${e.reason} ${JSON.stringify(e.meta)} ${e.at}`.toLowerCase();
+                return blob.includes(q);
+            });
+            const maxRows = 200;
+            tbody.innerHTML = rows.slice(0, maxRows).map((e) => {
+                const t = new Date(e.at || e._rx).toLocaleTimeString(localeArLatinDigits, {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                });
+                const reason = esc(e.reason || '');
+                const label = esc(SOCKET_REASON_LABELS[e.reason] || e.reason || '');
+                const meta = esc(JSON.stringify(e.meta || {}));
+                return `<tr class="hover:bg-slate-900/80 border-b border-slate-800/60">
+                    <td class="p-2.5 text-slate-500 whitespace-nowrap align-top">${t}</td>
+                    <td class="p-2.5 text-amber-300 font-black text-[10px] align-top">${reason}</td>
+                    <td class="p-2.5 text-slate-300 text-[11px] align-top">${label}</td>
+                    <td class="p-2.5 text-slate-500 text-[10px] break-all align-top" dir="ltr">${meta}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function toggleSnifferPause() {
+            snifferPaused = !snifferPaused;
+            const btn = document.getElementById('sniffer-pause-btn');
+            if (btn) {
+                btn.textContent = snifferPaused ? 'استئناف التسجيل' : 'إيقاف مؤقت';
+                btn.classList.toggle('bg-emerald-500/20', snifferPaused);
+                btn.classList.toggle('text-emerald-300', snifferPaused);
+                btn.classList.toggle('border-emerald-500/40', snifferPaused);
+            }
+        }
+
+        function clearSnifferLog() {
+            snifferEntries.length = 0;
+            renderSnifferTable();
+            const c = document.getElementById('sniffer-live-count');
+            if (c) c.textContent = '0';
+        }
+
+        async function copySnifferLog() {
+            try {
+                await navigator.clipboard.writeText(JSON.stringify(snifferEntries, null, 2));
+                alert('تم نسخ السجل');
+            } catch (_) {
+                alert('تعذر النسخ — جرّب المتصفح الحديث أو HTTPS');
+            }
+        }
+
+        function setTextSafe(id, text) {
+            const el = document.getElementById(id);
+            if (el) el.innerText = text;
+        }
+
+        function connectAdminRealtime() {
+            if (typeof io === 'undefined') {
+                setSocketBadgesText('تعذر تحميل قناة الوقت الحقيقي');
+                return;
+            }
+            if (!token) return;
+            adminSocket?.disconnect?.();
+            adminSocket = io(window.location.origin, {
+                path: '/socket.io/',
+                auth: { token },
+                transports: ['websocket', 'polling'],
+                reconnectionAttempts: Infinity,
+                reconnectionDelay: 1200,
+            });
+
+            adminSocket.on('connect', () => {
+                setSocketBadgesText('قناة مباشرة');
+                styleSocketBadges(
+                    ['bg-rose-100', 'text-rose-800', 'bg-slate-200', 'text-slate-600', 'bg-amber-100', 'text-amber-800', 'bg-darbak-light-green', 'text-primary-dark'],
+                    ['bg-darbak-light-green', 'text-primary-dark'],
+                );
+                setTextSafe('admin-connection-label', 'متصل — تحديثات فورية');
+                const dot = document.getElementById('admin-live-dot');
+                if (dot) dot.style.background = '#088A3B';
+                pushSnifferEntry({ reason: 'socket.connected', meta: {}, at: new Date().toISOString() });
+            });
+
+            adminSocket.on('disconnect', () => {
+                setSocketBadgesText('إعادة الربط…');
+                styleSocketBadges(
+                    ['bg-darbak-light-green', 'text-primary-dark', 'bg-rose-100', 'text-rose-800'],
+                    ['bg-amber-100', 'text-darbak-orange'],
+                );
+                setTextSafe('admin-connection-label', 'انقطاع مؤقت');
+                const dot = document.getElementById('admin-live-dot');
+                if (dot) dot.style.background = '#F59E0B';
+            });
+
+            adminSocket.on('connect_error', () => {
+                setSocketBadgesText('خطأ شبكة أو رمز');
+                styleSocketBadges(
+                    ['bg-darbak-light-green', 'text-primary-dark', 'bg-slate-200', 'text-slate-600', 'bg-amber-100', 'text-amber-800'],
+                    ['bg-red-50', 'text-darbak-danger'],
+                );
+            });
+
+            adminSocket.on('admin:refresh', (payload) => {
+                pushSnifferEntry(payload || {});
+                const reason = payload?.reason || 'update';
+                const hint = document.getElementById('admin-last-socket-reason');
+                if (hint) {
+                    hint.classList.remove('hidden');
+                    const label = SOCKET_REASON_LABELS[reason] || reason;
+                    hint.textContent = 'آخر حدث: ' + label;
+                    hint.title = JSON.stringify(payload?.meta || {});
+                }
+                if (adminRefreshTimer) clearTimeout(adminRefreshTimer);
+                adminRefreshTimer = setTimeout(() => {
+                    adminRefreshTimer = null;
+                    void applyAdminRealtimeRefresh();
+                }, 400);
+            });
+        }
+
+        async function applyAdminRealtimeRefresh() {
+            if (!token) return;
+            await refreshData();
+            await loadNotifications();
+            const usersSection = document.getElementById('users-section');
+            if (usersSection && !usersSection.classList.contains('hidden')) {
+                await browseUsers(usersPager.page);
+            }
+            const shipmentsSection = document.getElementById('shipments-section');
+            if (shipmentsSection && !shipmentsSection.classList.contains('hidden')) {
+                await browseShipments(shipPager.page);
+            }
+        }
+
+        /** عرض المبالغ في لوحة التحكم: ر.س (يتم تمريرها من السيرفر في نص النشاط أيضاً) */
+        const SAR_SYMBOL = 'ر.س';
 
         let activityFeedOffset = 0;
         let pendingPager = { page: 1, limit: 8 };
         let usersPager = { page: 1, limit: 15 };
         let shipPager = { page: 1, limit: 20 };
-        let disputesPager = { page: 1, limit: 12 };
         let usersRoleTab = '';
 
         function authHeaders(json = false) {
@@ -472,6 +742,10 @@
             const x = Number(n);
             if (!Number.isFinite(x)) return '0';
             return x.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+        }
+
+        function sarMoney(n) {
+            return `${numsEnMoney(n)} ${SAR_SYMBOL}`;
         }
 
         const localeArLatinDigits = 'ar-SA-u-nu-latn';
@@ -499,7 +773,7 @@
 
                     if (data.success) {
                         if (data.user.role !== 'admin') {
-                            errorEl.innerText = 'عذراً، هذا الحساب لا يملك صلاحيات مدير';
+                            errorEl.innerText = 'عذراً، هذا الحساب لا يملك صلاحيات الأدمن';
                             errorEl.classList.remove('hidden');
                             return;
                         }
@@ -519,6 +793,9 @@
             });
 
             document.getElementById('logout-btn').addEventListener('click', () => {
+                try {
+                    adminSocket?.disconnect?.();
+                } catch (_) {}
                 localStorage.removeItem('darbak_admin_token');
                 window.location.reload();
             });
@@ -545,6 +822,46 @@
                 usersSearchEl.addEventListener('input', () => {
                     clearTimeout(usersSearchTimer);
                     usersSearchTimer = setTimeout(() => browseUsers(1), 450);
+                });
+            }
+
+            let snifferFilterTimer;
+            const globalSearchEl = document.getElementById('admin-global-search');
+            if (globalSearchEl) {
+                globalSearchEl.addEventListener('input', () => {
+                    clearTimeout(snifferFilterTimer);
+                    snifferFilterTimer = setTimeout(() => renderSnifferTable(), 180);
+                });
+            }
+
+            /* معاينة / توثيق: بدون onclick مضمّن (BigInt أو مسارات فيها علامات تكسر المعالج) */
+            const pendingBody = document.getElementById('pending-users-body');
+            if (pendingBody) {
+                pendingBody.addEventListener('click', (e) => {
+                    const previewBtn = e.target.closest('[data-action="preview-doc"]');
+                    if (previewBtn) {
+                        e.preventDefault();
+                        const itemId = parseInt(String(previewBtn.getAttribute('data-item-id') || ''), 10);
+                        const sourceKind = previewBtn.getAttribute('data-source-kind') || 'compliance';
+                        const enc = previewBtn.getAttribute('data-doc-url') || '';
+                        let url = '';
+                        try {
+                            url = decodeURIComponent(enc);
+                        } catch (_) {
+                            url = enc;
+                        }
+                        const typ = previewBtn.getAttribute('data-doc-type') || '';
+                        void previewDoc(itemId, url, typ, sourceKind);
+                        return;
+                    }
+                    const verifyBtn = e.target.closest('[data-action="verify-doc"]');
+                    if (verifyBtn) {
+                        e.preventDefault();
+                        const itemId = parseInt(String(verifyBtn.getAttribute('data-item-id') || ''), 10);
+                        const sourceKind = verifyBtn.getAttribute('data-source-kind') || 'compliance';
+                        const st = verifyBtn.getAttribute('data-verify-status') || '';
+                        void verifyDoc(itemId, st, sourceKind);
+                    }
                 });
             }
         });
@@ -661,6 +978,7 @@
                             <td class="p-4 text-left">
                                 <div class="flex flex-wrap items-center justify-end gap-2">
                                     <button type="button" onclick="openUserDetail(${u.id})" class="${ub} bg-slate-800 text-white hover:bg-slate-900">تفاصيل</button>
+                                    <button type="button" onclick="openEditUserModal(${u.id})" class="${ub} bg-white border border-slate-200 text-slate-700 hover:border-primary hover:text-primary">تعديل</button>
                                     ${verifyBtn}
                                     ${toggleBtn}
                                 </div>
@@ -704,7 +1022,7 @@
                         <td class="p-4 text-xs font-bold">${esc(s.shipper_name || '—')}</td>
                         <td class="p-4 text-xs text-slate-600">${esc(s.driver_name || '—')}</td>
                         <td class="p-4"><span class="px-3 py-1 rounded-full text-[9px] font-black uppercase ${getStatusStyle(s.status)}">${esc(s.status)}</span></td>
-                        <td class="p-4 font-black text-primary">${numsEnMoney(s.final_price || s.base_price || 0)} ريال</td>
+                        <td class="p-4 font-black text-primary">${sarMoney(s.final_price || s.base_price || 0)}</td>
                     </tr>`).join('');
             } catch (e) {
                 body.innerHTML = '<tr><td colspan="5" class="py-16 text-center text-rose-500">فشل الاتصال</td></tr>';
@@ -721,14 +1039,35 @@
                 const data = await res.json();
                 if (!data.success) throw new Error(data.message);
                 const u = data.data;
-                const trucks = (u.trucks || []).map((t) => `<li class="text-xs border-b border-slate-100 py-2">${esc(t.plate_number)} · ${esc(t.truck_type || '')} · ${esc(t.verification_status)}</li>`).join('');
+                const trucks = (u.trucks || []).map((t) => {
+                    const active = t.is_active ? 'نشطة' : '';
+                    const cls = [
+                        t.category ? `فئة: ${t.category}` : '',
+                        t.axle_count ? `${t.axle_count} محور` : '',
+                        t.body_type ? `هيكل: ${t.body_type}` : '',
+                        t.max_weight_tons ? `${t.max_weight_tons} طن` : '',
+                    ].filter(Boolean).join(' · ');
+                    return `<li class="text-xs border-b border-slate-100 py-2">
+                        <div class="font-bold">${esc(t.plate_number)} ${active ? `<span class="text-emerald-600">(${active})</span>` : ''}</div>
+                        <div class="text-slate-500 mt-1">${esc(t.truck_type || cls || '—')}</div>
+                        <div class="text-[10px] text-slate-400">${esc(t.verification_status)}</div>
+                    </li>`;
+                }).join('');
+                const oc = u.operating_card;
+                const ocPreview = oc
+                    ? `<button type="button" onclick="previewDoc(${parseInt(oc.id, 10)}, '${encodeURIComponent(oc.file_key || oc.file_url || '')}', 'operating_card', 'operating_card')" class="text-primary text-xs font-black hover:underline mt-1">عرض بطاقة التشغيل (${esc(oc.verification_status)})</button>`
+                    : '<span class="text-xs text-slate-400">لم تُرفع بعد</span>';
                 const inactiveNote = u.is_active === 0 ? ' · معطّل' : '';
                 wrap.innerHTML = `
                     <div><span class="text-slate-400 text-[10px] font-bold">الاسم</span><div class="font-black">${esc(u.full_name)}</div></div>
                     <div><span class="text-slate-400 text-[10px] font-bold">التواصل</span><div>${esc(u.email || '—')} · ${esc(u.phone)}</div></div>
                     <div><span class="text-slate-400 text-[10px] font-bold">الدور</span><div>${esc(u.role)}</div></div>
                     <div><span class="text-slate-400 text-[10px] font-bold">التوثيق</span><div>${esc(u.verification_status)}${inactiveNote}</div></div>
-                    ${u.role === 'driver' ? `<div><span class="text-slate-400 text-[10px] font-bold">المركبات</span><ul class="mt-2 pr-4">${trucks || '<li class="text-xs text-slate-400">لا توجد بيانات</li>'}</ul></div>` : ''}`;
+                    ${u.role === 'driver' ? `<div><span class="text-slate-400 text-[10px] font-bold">بطاقة التشغيل</span><div class="mt-1">${ocPreview}</div></div>` : ''}
+                    ${u.role === 'driver' ? `<div><span class="text-slate-400 text-[10px] font-bold">المركبات</span><ul class="mt-2 pr-4">${trucks || '<li class="text-xs text-slate-400">لا توجد بيانات</li>'}</ul></div>` : ''}
+                    <div class="pt-4 border-t border-slate-100">
+                        <button type="button" onclick="openEditUserModal(${u.id})" class="w-full py-3 rounded-xl bg-primary text-white text-xs font-black hover:brightness-110">تعديل البيانات</button>
+                    </div>`;
             } catch (e) {
                 wrap.innerHTML = `<p class="text-rose-600 font-bold text-center">${esc(e.message || 'خطأ')}</p>`;
             }
@@ -736,6 +1075,110 @@
 
         function closeUserDetail() {
             document.getElementById('user-detail-modal').style.display = 'none';
+        }
+
+        function closeAdminUserFormModal() {
+            document.getElementById('admin-user-form-modal').style.display = 'none';
+        }
+
+        function openCreateUserModal() {
+            document.getElementById('au-user-id').value = '';
+            document.getElementById('admin-user-form-title').innerHTML =
+                '<i class="fas fa-user-plus text-primary"></i> مستخدم جديد';
+            document.getElementById('au-full-name').value = '';
+            document.getElementById('au-email').value = '';
+            document.getElementById('au-phone').value = '';
+            document.getElementById('au-password').value = '';
+            document.getElementById('au-password').required = true;
+            document.getElementById('au-password-hint').textContent = 'مطلوبة (6 أحرف على الأقل)';
+            document.getElementById('au-role').value = 'driver';
+            document.getElementById('au-role-wrap').classList.remove('hidden');
+            document.getElementById('au-role').disabled = false;
+            document.getElementById('au-verification-wrap').classList.add('hidden');
+            document.getElementById('admin-user-form-modal').style.display = 'block';
+        }
+
+        async function openEditUserModal(id) {
+            closeUserDetail();
+            document.getElementById('au-user-id').value = String(id);
+            document.getElementById('admin-user-form-title').innerHTML =
+                '<i class="fas fa-user-pen text-primary"></i> تعديل مستخدم';
+            document.getElementById('au-password').value = '';
+            document.getElementById('au-password').required = false;
+            document.getElementById('au-password-hint').textContent = 'اتركه فارغاً إذا لا تريد تغيير كلمة المرور';
+            document.getElementById('au-role-wrap').classList.remove('hidden');
+            document.getElementById('au-verification-wrap').classList.add('hidden');
+            try {
+                const res = await fetch(`${API_URL}/admin/users/${id}/detail`, { headers: authHeaders() });
+                const data = await res.json();
+                if (!data.success || !data.data) throw new Error(data.message || 'خطأ');
+                const u = data.data;
+                document.getElementById('au-full-name').value = u.full_name || '';
+                document.getElementById('au-email').value = u.email || '';
+                document.getElementById('au-phone').value = u.phone || '';
+                if (u.role === 'admin') {
+                    document.getElementById('au-role').value = 'driver';
+                    document.getElementById('au-role-wrap').classList.add('hidden');
+                    document.getElementById('au-role').disabled = true;
+                } else {
+                    document.getElementById('au-role').disabled = false;
+                    document.getElementById('au-role').value = u.role === 'shipper' ? 'shipper' : 'driver';
+                    document.getElementById('au-verification').value = u.verification_status || 'pending';
+                    document.getElementById('au-verification-wrap').classList.remove('hidden');
+                }
+            } catch (e) {
+                alert(e.message || 'تعذر تحميل بيانات المستخدم');
+                return;
+            }
+            document.getElementById('admin-user-form-modal').style.display = 'block';
+        }
+
+        async function submitAdminUserForm(e) {
+            e.preventDefault();
+            const id = document.getElementById('au-user-id').value.trim();
+            const full_name = document.getElementById('au-full-name').value.trim();
+            const email = document.getElementById('au-email').value.trim();
+            const phone = document.getElementById('au-phone').value.trim();
+            const password = document.getElementById('au-password').value;
+            const roleEl = document.getElementById('au-role');
+            const role = roleEl.disabled ? undefined : roleEl.value;
+            const verEl = document.getElementById('au-verification');
+            const verification_status = verEl.closest('#au-verification-wrap').classList.contains('hidden')
+                ? undefined
+                : verEl.value;
+
+            try {
+                if (!id) {
+                    if (password.length < 6) {
+                        alert('كلمة المرور مطلوبة (6 أحرف على الأقل)');
+                        return;
+                    }
+                    const res = await fetch(`${API_URL}/admin/users`, {
+                        method: 'POST',
+                        headers: authHeaders(true),
+                        body: JSON.stringify({ full_name, email, phone, password, role: role || 'driver' }),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok || data.success === false) throw new Error(data.message || 'فشل الإنشاء');
+                } else {
+                    const body = { full_name, email, phone };
+                    if (password.length > 0) body.password = password;
+                    if (role !== undefined) body.role = role;
+                    if (verification_status !== undefined) body.verification_status = verification_status;
+                    const res = await fetch(`${API_URL}/admin/users/${encodeURIComponent(id)}`, {
+                        method: 'PATCH',
+                        headers: authHeaders(true),
+                        body: JSON.stringify(body),
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok || data.success === false) throw new Error(data.message || 'فشل التحديث');
+                }
+                closeAdminUserFormModal();
+                browseUsers(usersPager.page);
+                refreshData();
+            } catch (err) {
+                alert(err.message || 'خطأ');
+            }
         }
 
         async function verifyUserQuick(id) {
@@ -787,107 +1230,110 @@
                 dashboard: 'نظرة عامة',
                 users: 'إدارة المستخدمين',
                 shipments: 'متابعة الشحنات',
-                financials: 'المالية والجزاءات',
+                sniffer: ' النظام',
                 settings: 'الإعدادات',
             };
             document.getElementById('section-title').innerText = titles[sectionId] || '';
 
             if (sectionId === 'users') browseUsers(1);
             if (sectionId === 'shipments') browseShipments(1);
-            if (sectionId === 'financials') {
-                loadDisputes(1);
-                refreshOpenDisputesBanner();
-            }
-        }
-
-        async function refreshOpenDisputesBanner() {
-            try {
-                const res = await fetch(`${API_URL}/admin/disputes?status=open&limit=1&page=1`, { headers: authHeaders() });
-                const data = await res.json();
-                const el = document.getElementById('pending-disputes-count');
-                if (el && data.pagination) el.innerText = numsEn(data.pagination.total);
-            } catch (_) {}
-        }
-
-        async function loadDisputes(page = 1) {
-            disputesPager.page = Math.max(1, page);
-            const body = document.getElementById('disputes-body');
-            if (!body) return;
-            body.innerHTML = '<tr><td colspan="6" class="py-20 text-center"><div class="animate-spin rounded-full h-8 w-8 border-2 border-primary border-t-transparent mx-auto"></div></td></tr>';
-
-            try {
-                const params = new URLSearchParams({ page: disputesPager.page, limit: disputesPager.limit });
-                const search = document.getElementById('disputes-search')?.value?.trim();
-                const status = document.getElementById('disputes-status')?.value;
-                if (search) params.set('q', search);
-                if (status) params.set('status', status);
-
-                const res = await fetch(`${API_URL}/admin/disputes?${params}`, { headers: authHeaders() });
-                const data = await res.json();
-                const meta = document.getElementById('disputes-page-meta');
-                if (meta && data.pagination) {
-                    meta.innerText = `صفحة ${numsEn(data.pagination.page)} من ${numsEn(data.pagination.totalPages)} — ${numsEn(data.pagination.total)} سجل`;
-                }
-                refreshOpenDisputesBanner();
-
-                if (!data.success || !data.data?.length) {
-                    body.innerHTML = '<tr><td colspan="6" class="py-20 text-center text-slate-300 italic">لا توجد تظلمات مطابقة</td></tr>';
-                    return;
-                }
-                body.innerHTML = data.data.map((d) => {
-                    const rid = d.transaction_id || d.id;
-                    const canAct = d.status === 'open';
-                    const btns = canAct
-                        ? `<button type="button" onclick="resolveDispute(${rid}, 'approved')" class="bg-emerald-500 text-white px-4 py-2 rounded-lg text-[10px] font-bold">قبول</button>
-                           <button type="button" onclick="resolveDispute(${rid}, 'rejected')" class="bg-slate-200 text-slate-600 px-4 py-2 rounded-lg text-[10px] font-bold">رفض</button>`
-                        : `<span class="text-[10px] font-bold text-slate-400">${esc(d.status)}</span>`;
-                    return `
-                        <tr class="hover:bg-slate-50 transition-colors border-b border-slate-50">
-                            <td class="p-6"><div class="font-black text-slate-800">${esc(d.driver_name)}</div><div class="text-[10px] text-slate-400">شحنة #${numsEn(d.shipment_id)}</div></td>
-                            <td class="p-6"><span class="px-2 py-1 rounded bg-rose-50 text-rose-600 text-[10px] font-bold">تظلم مالي</span></td>
-                            <td class="p-6 font-black text-rose-600">${numsEnMoney(Math.abs(Number(d.amount || 0)))} ريال</td>
-                            <td class="p-6"><div class="text-xs text-slate-600 max-w-xs truncate" title="${esc(d.dispute_reason)}">${esc(d.dispute_reason || '')}</div></td>
-                            <td class="p-6 text-[10px] text-slate-400">${new Date(d.created_at).toLocaleDateString(localeArLatinDigits)}</td>
-                            <td class="p-6 text-left flex gap-2 justify-end">${btns}</td>
-                        </tr>`;
-                }).join('');
-            } catch (e) {
-                body.innerHTML = '<tr><td colspan="6" class="py-20 text-center text-rose-500 font-bold">فشل جلب البيانات</td></tr>';
-            }
-        }
-
-        function disputesPrev() {
-            if (disputesPager.page > 1) loadDisputes(disputesPager.page - 1);
-        }
-        function disputesNext() {
-            loadDisputes(disputesPager.page + 1);
-        }
-
-        async function resolveDispute(transactionId, status) {
-            if (!confirm(`هل أنت متأكد من ${status === 'approved' ? 'قبول' : 'رفض'} هذا التظلم؟`)) return;
-
-            try {
-                const res = await fetch(`${API_URL}/admin/disputes/resolve`, {
-                    method: 'POST',
-                    headers: authHeaders(true),
-                    body: JSON.stringify({ transactionId, status }),
-                });
-                const data = await res.json();
-                if (data.success) {
-                    alert('تم تنفيذ الإجراء بنجاح');
-                    loadDisputes(disputesPager.page);
-                    refreshData();
-                } else alert('خطأ: ' + (data.message || ''));
-            } catch (e) {
-                alert('خطأ في الاتصال بالسيرفر');
-            }
+            if (sectionId === 'sniffer') renderSnifferTable();
         }
 
         async function initDashboard() {
             refreshData();
             loadNotifications();
-            setInterval(refreshData, 15000);
-            setInterval(loadNotifications, 30000);
+            connectAdminRealtime();
+            setInterval(refreshData, 120000);
+            setInterval(loadNotifications, 45000);
+        }
+
+        function setStatDelta(elId, prevVal, curVal) {
+            const el = document.getElementById(elId);
+            if (!el) return;
+            if (prevVal === undefined || prevVal === null || !Number.isFinite(Number(curVal))) {
+                el.textContent = '';
+                el.className = 'stat-delta-flat mt-1 min-h-[14px]';
+                return;
+            }
+            const d = Number(curVal) - Number(prevVal);
+            if (d === 0) {
+                el.textContent = 'ثابت عن آخر تحديث';
+                el.className = 'stat-delta-flat mt-1 min-h-[14px]';
+            } else if (d > 0) {
+                el.textContent = `↑ +${numsEn(d)} عن آخر تحديث`;
+                el.className = 'stat-delta-up mt-1 min-h-[14px]';
+            } else {
+                el.textContent = `↓ ${numsEn(d)} عن آخر تحديث`;
+                el.className = 'stat-delta-down mt-1 min-h-[14px]';
+            }
+        }
+
+        async function loadAdminCharts() {
+            if (typeof Chart === 'undefined') return;
+            if (!token) return;
+            const ctx1 = document.getElementById('chart-shipments');
+            const ctx2 = document.getElementById('chart-bids');
+            if (!ctx1 || !ctx2) return;
+            try {
+                const res = await fetch(`${API_URL}/admin/overview-charts`, { headers: authHeaders() });
+                const data = await res.json();
+                if (!data.success || !data.data?.series?.length) return;
+                const series = data.data.series;
+                const labels = series.map((x) => {
+                    const p = String(x.date || '');
+                    return p.length >= 10 ? `${p.slice(8, 10)}/${p.slice(5, 7)}` : p;
+                });
+                const shipData = series.map((x) => Number(x.shipments) || 0);
+                const bidData = series.map((x) => Number(x.bids) || 0);
+                const chartOpts = {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { color: '#E6E9EF' }, ticks: { font: { size: 10 }, color: '#6B7280' } },
+                        y: { beginAtZero: true, grid: { color: '#E6E9EF' }, ticks: { font: { size: 10 }, color: '#6B7280' } },
+                    },
+                };
+                if (adminChartShip) adminChartShip.destroy();
+                if (adminChartBid) adminChartBid.destroy();
+                adminChartShip = new Chart(ctx1, {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets: [
+                            {
+                                label: 'شحنات',
+                                data: shipData,
+                                borderColor: '#088A3B',
+                                backgroundColor: 'rgba(8,138,59,0.12)',
+                                tension: 0.35,
+                                fill: true,
+                            },
+                        ],
+                    },
+                    options: chartOpts,
+                });
+                adminChartBid = new Chart(ctx2, {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets: [
+                            {
+                                label: 'عروض',
+                                data: bidData,
+                                borderColor: '#168A57',
+                                backgroundColor: 'rgba(22,138,87,0.12)',
+                                tension: 0.35,
+                                fill: true,
+                            },
+                        ],
+                    },
+                    options: chartOpts,
+                });
+            } catch (err) {
+                console.warn('[loadAdminCharts]', err);
+            }
         }
 
         async function refreshData() {
@@ -899,30 +1345,65 @@
                 const s = data.data;
                 const sum = s.summary || {};
 
-                document.getElementById('total-users').innerText = numsEn(
-                    sum.totalUsers ?? (s.userStats || []).reduce((a, b) => a + b.total, 0)
+                setTextSafe(
+                    'total-users',
+                    numsEn(sum.totalUsers ?? (s.userStats || []).reduce((a, b) => a + b.total, 0)),
                 );
-                document.getElementById('stat-drivers').innerText =
-                    sum.driversCount !== undefined && sum.driversCount !== null ? numsEn(sum.driversCount) : '—';
-                document.getElementById('stat-companies').innerText =
-                    sum.companiesCount !== undefined && sum.companiesCount !== null ? numsEn(sum.companiesCount) : '—';
-                document.getElementById('active-shipments').innerText = numsEn(
-                    sum.activeTrips ??
-                        (s.shipmentStats || [])
-                            .filter((x) => ['assigned', 'at_pickup', 'en_route', 'at_dropoff'].includes(x.status))
-                            .reduce((a, b) => a + b.total, 0)
+                setTextSafe(
+                    'stat-drivers',
+                    sum.driversCount !== undefined && sum.driversCount !== null ? numsEn(sum.driversCount) : '—',
                 );
-                document.getElementById('completed-trips-stat').innerText = numsEn(
-                    sum.completedTrips ?? (s.shipmentStats || []).find((x) => x.status === 'delivered')?.total ?? 0
+                setTextSafe(
+                    'stat-companies',
+                    sum.companiesCount !== undefined && sum.companiesCount !== null ? numsEn(sum.companiesCount) : '—',
                 );
-                document.getElementById('pending-count-stat').innerText = numsEn(
-                    sum.pendingVerifications ?? s.pendingUsersCount ?? 0
+                setTextSafe(
+                    'active-shipments',
+                    numsEn(
+                        sum.activeTrips ??
+                            (s.shipmentStats || [])
+                                .filter((x) => ['assigned', 'at_pickup', 'en_route', 'at_dropoff'].includes(x.status))
+                                .reduce((a, b) => a + b.total, 0),
+                    ),
                 );
-                document.getElementById('revenue-stat').innerText = `${numsEnMoney(sum.totalRevenue || 0)} ريال`;
-                document.getElementById('open-disputes-stat').innerText = numsEn(sum.openDisputes ?? 0);
-                document.getElementById('active-bids').innerText = numsEn(
-                    sum.pendingBidsCount ?? (s.shipmentStats || []).find((x) => x.status === 'bidding')?.total ?? 0
+                setTextSafe(
+                    'completed-trips-stat',
+                    numsEn(sum.completedTrips ?? (s.shipmentStats || []).find((x) => x.status === 'delivered')?.total ?? 0),
                 );
+                setTextSafe('pending-count-stat', numsEn(sum.pendingVerifications ?? s.pendingUsersCount ?? 0));
+                setTextSafe('revenue-stat', sarMoney(sum.totalRevenue || 0));
+                setTextSafe(
+                    'active-bids',
+                    numsEn(
+                        sum.pendingBidsCount ?? (s.shipmentStats || []).find((x) => x.status === 'bidding')?.total ?? 0,
+                    ),
+                );
+
+                const curTotal = Number(sum.totalUsers ?? (s.userStats || []).reduce((a, b) => a + b.total, 0)) || 0;
+                const curActiveShip =
+                    Number(
+                        sum.activeTrips ??
+                            (s.shipmentStats || [])
+                                .filter((x) => ['assigned', 'at_pickup', 'en_route', 'at_dropoff'].includes(x.status))
+                                .reduce((a, b) => a + b.total, 0),
+                    ) || 0;
+                const curCompleted =
+                    Number(sum.completedTrips ?? (s.shipmentStats || []).find((x) => x.status === 'delivered')?.total ?? 0) ||
+                    0;
+                const curPending = Number(sum.pendingVerifications ?? s.pendingUsersCount ?? 0) || 0;
+                const prevSnap = window.__adminPrevStats;
+                if (prevSnap) {
+                    setStatDelta('delta-total-users', prevSnap.totalUsers, curTotal);
+                    setStatDelta('delta-active-shipments', prevSnap.activeShipments, curActiveShip);
+                    setStatDelta('delta-completed-trips', prevSnap.completedTrips, curCompleted);
+                    setStatDelta('delta-pending-docs', prevSnap.pendingDocs, curPending);
+                }
+                window.__adminPrevStats = {
+                    totalUsers: curTotal,
+                    activeShipments: curActiveShip,
+                    completedTrips: curCompleted,
+                    pendingDocs: curPending,
+                };
 
                 activityFeedOffset = (s.activities || []).length;
                 updateActivityFeed(s.activities || [], true);
@@ -933,6 +1414,8 @@
                 const pendBadge = document.getElementById('pending-badge');
                 const pendN = sum.pendingVerifications ?? s.pendingUsersCount ?? 0;
                 if (pendBadge) pendBadge.style.display = pendN > 0 ? '' : 'none';
+
+                void loadAdminCharts();
             } catch (e) {
                 console.error('Refresh Failed', e);
             }
@@ -959,6 +1442,7 @@
         function renderActivityRow(a) {
             const [icon, color] = activityIcon(a.type);
             const t = a.activity_date || a.created_at;
+            const detail = normalizeActivityDetail(a.detail);
             return `
                 <div class="activity-item flex gap-3 w-full shrink-0 p-4 rounded-2xl border border-slate-100 bg-gradient-to-l from-white to-slate-50/90 shadow-sm text-right">
                     <div class="w-11 h-11 rounded-xl ${color} text-white flex items-center justify-center shadow-md shrink-0">
@@ -969,9 +1453,22 @@
                             <span class="text-[9px] font-bold text-slate-400 whitespace-nowrap">${new Date(t).toLocaleString(localeArLatinDigits, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
                         <h5 class="text-[11px] font-black text-slate-800 leading-snug">${esc(a.actor)}</h5>
-                        <p class="text-[10px] text-slate-500 leading-relaxed mt-1">${esc(a.detail)}</p>
+                        <p class="text-[10px] text-slate-500 leading-relaxed mt-1">${esc(detail)}</p>
                     </div>
                 </div>`;
+        }
+
+        /** يصل من SQL قديم رموز لا تدعمها خطوط الويب — نعرض «ر.س» بدل المربعات */
+        function normalizeActivityDetail(detail) {
+            let s = String(detail ?? '').trim();
+            s = s.replace(/\uFFFD/g, '');
+            s = s.replace(/\u20BF/g, 'ر.س');
+            s = s.replace(/⃁/g, 'ر.س');
+            s = s.replace(/[\uE000-\uF8FF]+$/g, '').trim();
+            if (/تقديم عرض سعر بقيمة/i.test(s) && !/ر\.س\s*$/i.test(s)) {
+                s = `${s} ر.س`;
+            }
+            return s.replace(/\s+/g, ' ').trim();
         }
 
         function updateActivityFeed(activities, reset) {
@@ -1092,7 +1589,7 @@
                     <td class="p-6 text-center">
                         <span class="px-3 py-1 rounded-full text-[9px] font-black uppercase ${getStatusStyle(s.status)}">${esc(s.status)}</span>
                     </td>
-                    <td class="p-6 text-left font-black text-primary text-sm">${numsEnMoney(s.final_price || s.base_price || 0)} ريال</td>
+                    <td class="p-6 text-left font-black text-primary text-sm">${sarMoney(s.final_price || s.base_price || 0)}</td>
                 </tr>
             `).join('');
         }
@@ -1111,11 +1608,18 @@
                 const docLabel = (dt) => {
                     if (dt === 'commercial_registration') return 'السجل التجاري';
                     if (dt === 'driver_license') return 'رخصة السائق';
+                    if (dt === 'operating_card') return 'بطاقة التشغيل';
                     return dt || 'مستند';
                 };
 
                 if (data.success && data.data.length > 0) {
-                    body.innerHTML = data.data.map((u) => `
+                    body.innerHTML = data.data.map((u) => {
+                        const itemId = parseInt(String(u.item_id ?? u.document_id ?? ''), 10) || 0;
+                        const sourceKind = String(u.source_kind || 'compliance');
+                        const isOperatingCard = sourceKind === 'operating_card' || u.document_type === 'operating_card';
+                        const docUrlEnc = encodeURIComponent(String(u.document_url ?? ''));
+                        const docTypeEsc = esc(u.document_type || '');
+                        return `
                         <tr class="hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0">
                             <td class="px-8 py-5">
                                 <div class="font-black text-slate-800">${esc(u.full_name)}</div>
@@ -1125,16 +1629,16 @@
                                 <span class="text-[9px] font-bold px-3 py-1 rounded-lg ${u.role === 'driver' ? 'bg-emerald-50 text-emerald-700' : 'bg-blue-50 text-blue-700'} border border-current opacity-70">${u.role === 'driver' ? 'سائق' : 'شاحن'}</span>
                             </td>
                             <td class="px-4 py-5">
-                                <button type="button" onclick="previewDoc(${u.document_id}, ${JSON.stringify(u.document_url)}, ${JSON.stringify(u.document_type)})" class="text-primary font-black text-[10px] hover:underline flex items-center gap-2">
-                                    <i class="fas fa-file-pdf"></i> عرض ${docLabel(u.document_type)}
+                                <button type="button" data-action="preview-doc" data-item-id="${itemId}" data-source-kind="${esc(sourceKind)}" data-doc-url="${docUrlEnc}" data-doc-type="${docTypeEsc}" class="text-primary font-black text-[10px] hover:underline flex items-center gap-2 cursor-pointer">
+                                    <i class="fas ${isOperatingCard ? 'fa-id-card' : 'fa-file-pdf'}"></i> عرض ${docLabel(u.document_type)}
                                 </button>
                             </td>
                             <td class="px-8 py-5 text-left flex gap-3 justify-end">
-                                <button type="button" onclick="verifyDoc(${u.document_id}, 'verified')" class="w-9 h-9 bg-emerald-500 text-white rounded-xl hover:bg-emerald-600 transition shadow-lg shadow-emerald-100 flex items-center justify-center"><i class="fas fa-check"></i></button>
-                                <button type="button" onclick="verifyDoc(${u.document_id}, 'rejected')" class="w-9 h-9 bg-rose-500 text-white rounded-xl hover:bg-rose-600 transition shadow-lg shadow-rose-100 flex items-center justify-center"><i class="fas fa-times text-xs"></i></button>
+                                <button type="button" data-action="verify-doc" data-item-id="${itemId}" data-source-kind="${esc(sourceKind)}" data-verify-status="verified" class="w-9 h-9 bg-emerald-500 text-white rounded-xl hover:bg-emerald-600 transition shadow-lg shadow-emerald-100 flex items-center justify-center"><i class="fas fa-check"></i></button>
+                                <button type="button" data-action="verify-doc" data-item-id="${itemId}" data-source-kind="${esc(sourceKind)}" data-verify-status="rejected" class="w-9 h-9 bg-rose-500 text-white rounded-xl hover:bg-rose-600 transition shadow-lg shadow-rose-100 flex items-center justify-center"><i class="fas fa-times text-xs"></i></button>
                             </td>
-                        </tr>
-                    `).join('');
+                        </tr>`;
+                    }).join('');
                 } else {
                     body.innerHTML = '<tr><td colspan="4" class="py-20 text-center text-slate-300 italic">لا توجد طلبات معلقة حالياً</td></tr>';
                 }
@@ -1197,29 +1701,55 @@
             return { kind, blob: new Blob([ab], { type: blob.type || 'application/octet-stream' }) };
         }
 
-        /** معاينة بالشكل القديم: iframe للـ PDF وصورة مباشرة */
+        /** معاينة PDF / صورة — تعيين src عبر DOM لتفادي كسر الـ HTML أو الروابط الطويلة */
         function renderPreviewInto(container, src, kind) {
-            const srcJson = JSON.stringify(src);
+            container.innerHTML = '';
+            const safe = String(src || '');
             if (kind === 'pdf') {
-                container.innerHTML = `<iframe src=${srcJson} class="w-full h-[600px] rounded-2xl border-0 shadow-xl bg-white" title="معاينة PDF"></iframe>`;
+                const iframe = document.createElement('iframe');
+                iframe.className = 'w-full h-[600px] rounded-2xl border-0 shadow-xl bg-white';
+                iframe.title = 'معاينة PDF';
+                iframe.referrerPolicy = 'no-referrer';
+                iframe.src = safe;
+                container.appendChild(iframe);
                 return;
             }
             if (kind === 'image') {
-                container.innerHTML = `
-                    <div class="relative group">
-                        <img src=${srcJson} class="max-w-full max-h-[600px] rounded-2xl shadow-2xl border-8 border-white object-contain" alt="معاينة">
-                        <div class="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none rounded-2xl"></div>
-                    </div>`;
+                const wrap = document.createElement('div');
+                wrap.className = 'relative group';
+                const img = document.createElement('img');
+                img.className = 'max-w-full max-h-[600px] rounded-2xl shadow-2xl border-8 border-white object-contain';
+                img.alt = 'معاينة';
+                img.referrerPolicy = 'no-referrer';
+                img.src = safe;
+                img.onerror = () => {
+                    wrap.innerHTML =
+                        '<p class="text-rose-600 font-bold text-center px-4">تعذر عرض الصورة. جرّب زر «فتح في نافذة جديدة» أعلاه.</p>';
+                };
+                wrap.appendChild(img);
+                const ov = document.createElement('div');
+                ov.className = 'absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors pointer-events-none rounded-2xl';
+                wrap.appendChild(ov);
+                container.appendChild(wrap);
                 return;
             }
-            container.innerHTML = `
-                <div class="text-center p-8 space-y-4">
-                    <p class="text-sm text-slate-600 font-bold">معاينة مباشرة غير متاحة لهذا الامتداد.</p>
-                    <a href=${srcJson} target="_blank" rel="noopener" class="inline-flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-xl text-xs font-black">فتح / تنزيل الملف</a>
-                </div>`;
+            const box = document.createElement('div');
+            box.className = 'text-center p-8 space-y-4';
+            const p = document.createElement('p');
+            p.className = 'text-sm text-slate-600 font-bold';
+            p.textContent = 'معاينة مباشرة غير متاحة لهذا الامتداد.';
+            const a = document.createElement('a');
+            a.href = safe;
+            a.target = '_blank';
+            a.rel = 'noopener';
+            a.className = 'inline-flex items-center gap-2 bg-primary text-white px-6 py-3 rounded-xl text-xs font-black';
+            a.textContent = 'فتح / تنزيل الملف';
+            box.appendChild(p);
+            box.appendChild(a);
+            container.appendChild(box);
         }
 
-        async function previewDoc(a, b, c) {
+        async function previewDoc(a, b, c, sourceKind = 'compliance') {
             const container = document.getElementById('previewContainer');
             const downloadBtn = document.getElementById('download-link');
 
@@ -1266,8 +1796,11 @@
 
             try {
                 /* 1) السلوك القديم: رابط موقّع مباشرة في iframe / img */
+                const isOperatingCard = sourceKind === 'operating_card' || type === 'operating_card';
                 const signQs = hasDocId
-                    ? `docId=${encodeURIComponent(String(idNum))}`
+                    ? (isOperatingCard
+                        ? `cardId=${encodeURIComponent(String(idNum))}`
+                        : `docId=${encodeURIComponent(String(idNum))}`)
                     : `url=${encodeURIComponent(url)}`;
                 const signRes = await fetch(`${API_URL}/admin/get-signed-url?${signQs}`, {
                     headers: authHeaders(),
@@ -1287,7 +1820,8 @@
                 /* 2) احتياطي: بث عبر السيرفر ثم blob (يعمل إذا فشل التوقيع أو حظر iframe) */
                 let res = null;
                 if (hasDocId) {
-                    res = await fetch(`${API_URL}/admin/documents/${idNum}/preview`, { headers: authHeaders() });
+                    const previewKind = isOperatingCard ? 'operating_card' : 'compliance';
+                    res = await fetch(`${API_URL}/admin/documents/${idNum}/preview?kind=${previewKind}`, { headers: authHeaders() });
                 }
                 if (!res || !res.ok) {
                     res = await fetch(`${API_URL}/admin/documents/preview?url=${encodeURIComponent(url)}`, {
@@ -1333,12 +1867,18 @@
             }
         }
 
-        async function verifyDoc(docId, status) {
-            const msg = status === 'verified' ? 'هل أنت متأكد من اعتماد هذا المستند؟' : 'هل تريد رفض هذا المستند؟ سيتم إخطار المستخدم';
+        async function verifyDoc(itemId, status, sourceKind = 'compliance') {
+            const isOperatingCard = sourceKind === 'operating_card';
+            const msg = status === 'verified'
+                ? (isOperatingCard ? 'اعتماد بطاقة التشغيل؟' : 'هل أنت متأكد من اعتماد هذا المستند؟')
+                : (isOperatingCard ? 'رفض بطاقة التشغيل؟' : 'هل تريد رفض هذا المستند؟ سيتم إخطار المستخدم');
             if (!confirm(msg)) return;
 
             try {
-                const res = await fetch(`${API_URL}/admin/documents/${docId}/verify`, {
+                const url = isOperatingCard
+                    ? `${API_URL}/admin/operating-cards/${itemId}/verify`
+                    : `${API_URL}/admin/documents/${itemId}/verify`;
+                const res = await fetch(url, {
                     method: 'POST',
                     headers: authHeaders(true),
                     body: JSON.stringify({ status })

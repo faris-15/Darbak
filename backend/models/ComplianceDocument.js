@@ -1,8 +1,12 @@
 const pool = require('../config/db');
+const { ensureTruckInsuranceSchema } = require('../utils/truckInsuranceSchema');
 
 class ComplianceDocument {
     static async create(data) {
-        let { user_id, document_type, document_url, expiry_date, issue_date } = data;
+        let { user_id, truck_id = null, document_type, document_url, expiry_date, issue_date } = data;
+        if (truck_id != null) {
+            await ensureTruckInsuranceSchema();
+        }
 
         // تنظيف الرابط لضمان تخزين المسار (Key) فقط
         if (document_url && document_url.includes('http')) {
@@ -18,9 +22,9 @@ class ComplianceDocument {
 
         const [result] = await pool.query(
             `INSERT INTO compliance_documents
-            (user_id, document_type, document_url, expiry_date, issue_date)
-            VALUES (?, ?, ?, ?, ?)`,
-            [user_id, document_type, document_url, expiry_date, issue_date]
+            (user_id, truck_id, document_type, document_url, expiry_date, issue_date)
+            VALUES (?, ?, ?, ?, ?, ?)`,
+            [user_id, truck_id, document_type, document_url, expiry_date, issue_date]
         );
         return result.insertId;
     }
@@ -31,6 +35,31 @@ class ComplianceDocument {
             [userId]
         );
         return rows;
+    }
+
+    static async findLatestByUserIdAndType(userId, documentType) {
+        const [rows] = await pool.query(
+            `SELECT *
+             FROM compliance_documents
+             WHERE user_id = ? AND document_type = ?
+             ORDER BY uploaded_at DESC, created_at DESC, document_id DESC
+             LIMIT 1`,
+            [userId, documentType]
+        );
+        return rows[0] || null;
+    }
+
+    static async findLatestByTruckIdAndType(truckId, documentType) {
+        await ensureTruckInsuranceSchema();
+        const [rows] = await pool.query(
+            `SELECT *
+             FROM compliance_documents
+             WHERE truck_id = ? AND document_type = ?
+             ORDER BY uploaded_at DESC, created_at DESC, document_id DESC
+             LIMIT 1`,
+            [truckId, documentType]
+        );
+        return rows[0] || null;
     }
 
     static async updateStatus(documentId, status, verifiedBy, notes = null) {

@@ -70,12 +70,19 @@ const deleteNotification = async (req, res) => {
   }
 };
 
-const triggerNotification = async (user_id, title, message) => {
+const triggerNotification = async (
+  user_id,
+  title,
+  message,
+  { shipment_id, related_shipment_id, bid_id, related_bid_id } = {}
+) => {
   try {
     const notification = await Notification.create({
       user_id,
       title,
       message,
+      related_shipment_id: related_shipment_id ?? shipment_id,
+      related_bid_id: related_bid_id ?? bid_id,
       is_read: 0,
     });
     return notification;

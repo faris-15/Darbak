@@ -1,7 +1,8 @@
-const { S3Client, GetObjectCommand, HeadBucketCommand } = require('@aws-sdk/client-s3');
+const { S3Client, GetObjectCommand, HeadBucketCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const multer = require('multer');
 const multerS3 = require('multer-s3');
+const crypto = require('crypto');
 const path = require('path');
 require('dotenv').config();
 
@@ -40,6 +41,18 @@ function warnIfMinioEndpointLooksLikeConsole(url, envName) {
 function sanitizeApiErrorMessage(msg) {
   if (!msg || typeof msg !== 'string') return '';
   return msg.replace(/\r?\n/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400);
+}
+
+function sanitizeOriginalFileName(originalName) {
+  const parsed = path.parse(originalName || 'upload');
+  const ext = parsed.ext.toLowerCase();
+  const base = (parsed.name || 'file')
+    .normalize('NFKD')
+    .replace(/[^\w.-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80) || 'file';
+  return `${base}${ext}`;
 }
 
 /**
@@ -167,26 +180,37 @@ if (minioEndpoint && process.env.MINIO_BUCKET) {
   });
 }
 
-const generatePresignedUrl = async (keyOrUrl) => {
-  if (!keyOrUrl) return null;
-  let key = keyOrUrl;
-  try {
-    // استخراج الـ Key إذا كان المدخل رابطاً كاملاً
-    if (keyOrUrl.startsWith('http')) {
+/** Normalize stored `document_url` (S3 key or full MinIO URL) to object key for GetObject / presign. */
+function resolveS3ObjectKey(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  const keyOrUrl = raw.trim();
+  if (!keyOrUrl) return '';
+  if (/^https?:\/\//i.test(keyOrUrl)) {
+    try {
       const url = new URL(keyOrUrl);
       let pathname = decodeURIComponent(url.pathname);
       const bucketName = process.env.MINIO_BUCKET;
-      if (pathname.includes(`/${bucketName}/`)) {
-        key = pathname.split(`/${bucketName}/`)[1];
-      } else {
-        const parts = pathname.split('/');
-        key = parts.slice(2).join('/');
+      if (bucketName && pathname.includes(`/${bucketName}/`)) {
+        return pathname.split(`/${bucketName}/`)[1].replace(/^\/+/, '');
       }
-    } else {
-      key = decodeURIComponent(keyOrUrl);
+      const parts = pathname.split('/').filter(Boolean);
+      if (bucketName && parts[0] === bucketName) {
+        return parts.slice(1).join('/');
+      }
+      return (parts.slice(1).join('/') || parts.join('/')).replace(/^\/+/, '');
+    } catch {
+      return '';
     }
+  }
+  return decodeURIComponent(keyOrUrl).replace(/^\/+/, '');
+}
 
-    key = key.replace(/^\/+/, ''); // إزالة أي سلاش في البداية
+const generatePresignedUrl = async (keyOrUrl) => {
+  if (!keyOrUrl) return null;
+  let key;
+  try {
+    key = resolveS3ObjectKey(String(keyOrUrl));
+    if (!key) return null;
 
     // تحديد نوع المحتوى للعرض المباشر
     let contentType = 'application/octet-stream';
@@ -195,6 +219,12 @@ const generatePresignedUrl = async (keyOrUrl) => {
     else if (lowerKey.endsWith('.jpg') || lowerKey.endsWith('.jpeg')) contentType = 'image/jpeg';
     else if (lowerKey.endsWith('.png')) contentType = 'image/png';
     else if (lowerKey.endsWith('.webp')) contentType = 'image/webp';
+    else if (lowerKey.endsWith('.gif')) contentType = 'image/gif';
+    else if (lowerKey.endsWith('.heic')) contentType = 'image/heic';
+    else if (lowerKey.endsWith('.heif')) contentType = 'image/heif';
+    else if (lowerKey.endsWith('.mp4')) contentType = 'video/mp4';
+    else if (lowerKey.endsWith('.mov')) contentType = 'video/quicktime';
+    else if (lowerKey.endsWith('.m4v')) contentType = 'video/x-m4v';
 
     const command = new GetObjectCommand({
       Bucket: process.env.MINIO_BUCKET,
@@ -226,6 +256,18 @@ const generatePresignedUrl = async (keyOrUrl) => {
   }
 };
 
+const deleteS3Object = async (keyOrUrl) => {
+  const key = resolveS3ObjectKey(String(keyOrUrl || ''));
+  if (!key) return false;
+  await s3.send(
+    new DeleteObjectCommand({
+      Bucket: process.env.MINIO_BUCKET,
+      Key: key,
+    })
+  );
+  return true;
+};
+
 const upload = multer({
   storage: multerS3({
     s3: s3,
@@ -239,16 +281,23 @@ const upload = multer({
          folder = req.body.role === 'driver' ? 'licenses' : 'commercial_docs';
       } else if (file.fieldname === 'epodPhoto') {
         folder = 'epod';
+      } else if (file.fieldname === 'insurance' || file.fieldname === 'truckInsurance') {
+        folder = 'vehicle_insurance';
+      } else if (file.fieldname === 'operatingCard') {
+        folder = 'drivers/operating-cards';
       }
-      cb(null, `${folder}/${Date.now().toString()}-${file.originalname}`);
+      const safeName = sanitizeOriginalFileName(file.originalname);
+      cb(null, `${folder}/${Date.now().toString()}-${crypto.randomUUID()}-${safeName}`);
     },
   }),
   fileFilter: (req, file, cb) => {
     // قبول أنواع الـ MIME المعروفة والامتدادات الشائعة
-    const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf', 'application/octet-stream'];
-    const allowedExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.pdf'];
+    const allowedMimeTypes = ['image/jpeg', 'image/pjpeg', 'image/png', 'image/webp', 'image/gif', 'image/heic', 'image/heif', 'application/pdf', 'application/x-pdf', 'application/octet-stream'];
+    const allowedExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.heic', '.heif', '.pdf'];
 
     const fileExtension = path.extname(file.originalname).toLowerCase();
+    const hasAllowedExtension = allowedExtensions.includes(fileExtension);
+    const hasAllowedMimeType = allowedMimeTypes.includes(file.mimetype);
 
     // طباعة تفاصيل الملف في السيرفر للمساعدة في التشخيص
     console.log(`--- [S3 Upload Attempt] ---`);
@@ -256,7 +305,7 @@ const upload = multer({
     console.log(`MIME Type: ${file.mimetype}`);
     console.log(`Extension: ${fileExtension}`);
 
-    if (allowedMimeTypes.includes(file.mimetype) || allowedExtensions.includes(fileExtension)) {
+    if (hasAllowedExtension && hasAllowedMimeType) {
       console.log(`Result: ACCEPTED`);
       cb(null, true);
     } else {
@@ -267,4 +316,94 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }
 });
 
-module.exports = { s3, upload, generatePresignedUrl, logS3SdkErrorResponsePreview, sanitizeApiErrorMessage };
+const isAllowedProfileImage = (file) => {
+  const allowedMimeTypes = [
+    'image/jpeg',
+    'image/pjpeg',
+    'image/png',
+    'image/webp',
+    'application/octet-stream',
+  ];
+  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
+  const fileExtension = path.extname(file.originalname || '').toLowerCase();
+  return allowedExtensions.includes(fileExtension) && allowedMimeTypes.includes(file.mimetype);
+};
+
+const isAllowedChatMedia = (file) => {
+  const allowedMimeTypes = [
+    'image/jpeg',
+    'image/pjpeg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+    'video/mp4',
+    'video/quicktime',
+    'video/x-m4v',
+    'application/octet-stream',
+  ];
+  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.mp4', '.mov', '.m4v'];
+  const fileExtension = path.extname(file.originalname || '').toLowerCase();
+  return allowedExtensions.includes(fileExtension) && allowedMimeTypes.includes(file.mimetype);
+};
+
+const profileImageUpload = multer({
+  storage: multerS3({
+    s3,
+    bucket: process.env.MINIO_BUCKET,
+    metadata: function (req, file, cb) {
+      cb(null, { fieldName: file.fieldname, userId: String(req.user?.id || '') });
+    },
+    key: function (req, _file, cb) {
+      const userId = Number(req.user?.id);
+      if (!userId) return cb(new Error('غير مصرح'));
+      cb(null, `profile/${userId}/${Date.now()}.jpg`);
+    },
+  }),
+  fileFilter: (_req, file, cb) => {
+    if (isAllowedProfileImage(file)) {
+      return cb(null, true);
+    }
+    return cb(new Error('نوع الصورة غير مدعوم. الصيغ المسموحة: jpg, jpeg, png, webp'));
+  },
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+const chatMediaUpload = multer({
+  storage: multerS3({
+    s3,
+    bucket: process.env.MINIO_BUCKET,
+    metadata: function (req, file, cb) {
+      cb(null, {
+        fieldName: file.fieldname,
+        userId: String(req.user?.id || ''),
+        shipmentId: String(req.params?.shipmentId || ''),
+      });
+    },
+    key: function (req, file, cb) {
+      const userId = Number(req.user?.id);
+      const shipmentId = Number(req.params?.shipmentId);
+      if (!userId || !shipmentId) return cb(new Error('بيانات رفع الوسائط غير مكتملة'));
+      const safeName = sanitizeOriginalFileName(file.originalname);
+      cb(null, `chat/${shipmentId}/${userId}/${Date.now()}-${crypto.randomUUID()}-${safeName}`);
+    },
+  }),
+  fileFilter: (_req, file, cb) => {
+    if (isAllowedChatMedia(file)) {
+      return cb(null, true);
+    }
+    return cb(new Error('نوع الوسائط غير مدعوم. الصيغ المسموحة: صور أو فيديو MP4/MOV.'));
+  },
+  limits: { fileSize: 50 * 1024 * 1024 },
+});
+
+module.exports = {
+  s3,
+  upload,
+  profileImageUpload,
+  chatMediaUpload,
+  generatePresignedUrl,
+  deleteS3Object,
+  resolveS3ObjectKey,
+  logS3SdkErrorResponsePreview,
+  sanitizeApiErrorMessage,
+};

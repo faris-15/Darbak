@@ -11,8 +11,11 @@ import 'package:http/http.dart' as http;
 import 'app_theme.dart';
 import 'app_widgets.dart';
 import 'api_service.dart';
+import 'contract/open_contract_pdf.dart';
 import 'trip_screens.dart';
 import 'ratings_screen.dart';
+import 'widgets/sar_price.dart';
+import 'utils/shipment_display.dart';
 
 /// شاشة متابعة حالة الرحلة مع Timeline و ePOD
 class JobTrackingScreen extends StatefulWidget {
@@ -51,31 +54,31 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
   final List<Map<String, dynamic>> _timelineSteps = [
     {
       'status': 'assigned',
-      'label': 'تم قبول العرض والتعيين',
+      'label': kShipmentLifecycleStatusAr['assigned']!,
       'icon': Icons.handshake_outlined,
       'color': Colors.green,
     },
     {
       'status': 'at_pickup',
-      'label': 'وصلت لموقع التحميل',
+      'label': kShipmentLifecycleStatusAr['at_pickup']!,
       'icon': Icons.location_on,
       'color': Colors.blue,
     },
     {
       'status': 'en_route',
-      'label': 'بدأت الرحلة (في الطريق)',
+      'label': kShipmentLifecycleStatusAr['en_route']!,
       'icon': Icons.local_shipping_outlined,
       'color': Colors.orange,
     },
     {
       'status': 'at_dropoff',
-      'label': 'وصلت لموقع التسليم',
+      'label': kShipmentLifecycleStatusAr['at_dropoff']!,
       'icon': Icons.location_on,
       'color': Colors.orange,
     },
     {
       'status': 'delivered',
-      'label': 'تم التسليم بنجاح',
+      'label': kShipmentLifecycleStatusAr['delivered']!,
       'icon': Icons.check_circle,
       'color': Colors.green,
     },
@@ -88,10 +91,9 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
-    _pulseAnimation = Tween<double>(
-      begin: 1.0,
-      end: 1.1,
-    ).animate(CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
+    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
     _loadShipmentData();
   }
 
@@ -125,8 +127,10 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
           perm == LocationPermission.deniedForever) {
         return;
       }
+      // Fast current position with timeout for background ping
       final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        desiredAccuracy: LocationAccuracy.medium,
+        timeLimit: const Duration(seconds: 5),
       );
       await ApiService.recordShipmentLiveLocation(
         shipmentId: widget.shipmentId,
@@ -162,31 +166,24 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
   }
 
   Future<void> _openContract() async {
-    try {
-      final urlStr = await ApiService.getShipmentContractSignedUrl(
-        widget.shipmentId,
-      );
-      if (urlStr == null || urlStr.isEmpty) return;
-      final url = Uri.parse(urlStr);
-      if (await canLaunchUrl(url)) {
-        await launchUrl(url, mode: LaunchMode.externalApplication);
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('تعذر فتح العقد: $e')),
-      );
-    }
+    await openShipmentContractPdfInApp(context, widget.shipmentId);
   }
 
-  Future<void> _loadShipmentData() async {
+  Future<void> _loadShipmentData({bool showLoading = true}) async {
+    if (showLoading) setState(() => _isLoading = true);
     try {
-      final shipment = await ApiService.getShipment(widget.shipmentId);
-      final historyResponse = await ApiService.getShipmentStatusHistory(
-        widget.shipmentId,
-      );
+      // Run both API calls in parallel
+      final results = await Future.wait([
+        ApiService.getShipment(widget.shipmentId),
+        ApiService.getShipmentStatusHistory(widget.shipmentId),
+      ]);
+
+      final shipment = results[0] as Map<String, dynamic>;
+      final historyResponse = results[1] as Map<String, dynamic>;
+
       final history = (historyResponse['history'] as List<dynamic>? ?? [])
           .cast<Map<String, dynamic>>();
+
       setState(() {
         _shipment = shipment;
         _podPhotoBackendPath = _extractLatestPodPath(history);
@@ -194,30 +191,80 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
       });
       _restartLocationPing();
     } catch (e) {
-      setState(() => _isLoading = false);
-      final message = e.toString();
-      final userMessage = message.contains('401')
-          ? 'الجلسة انتهت، يرجى تسجيل الدخول مرة أخرى'
-          : message.contains('SocketException') ||
-                message.contains('Connection refused')
-          ? 'تعذر الاتصال بالخادم، تأكد من تشغيل السيرفر'
-          : 'خطأ: $message';
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(userMessage)));
+      if (mounted) {
+        setState(() => _isLoading = false);
+        // Silently fail if it's a background refresh, otherwise show error
+        if (showLoading) {
+          final message = e.toString();
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $message')));
+        }
+      }
     }
   }
 
   Future<void> _pickPODPhoto() async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
+      final ImagePicker picker = ImagePicker();
+
+      final choice = await showModalBottomSheet<String>(
+        context: context,
+        builder: (context) => SafeArea(
+          child: Directionality(
+            textDirection: TextDirection.rtl,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.camera_alt),
+                  title: const Text('التقاط صورة'),
+                  onTap: () => Navigator.pop(context, 'camera'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_library),
+                  title: const Text('المعرض'),
+                  onTap: () => Navigator.pop(context, 'gallery'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.file_present),
+                  title: const Text('ملف (PDF/صورة)'),
+                  onTap: () => Navigator.pop(context, 'file'),
+                ),
+              ],
+            ),
+          ),
+        ),
       );
 
-      if (result != null && result.files.single.path != null) {
+      if (choice == null) return;
+
+      XFile? picked;
+      if (choice == 'camera') {
+        picked = await picker.pickImage(
+          source: ImageSource.camera,
+          maxWidth: 1600,
+          maxHeight: 1600,
+          imageQuality: 85,
+        );
+      } else if (choice == 'gallery') {
+        picked = await picker.pickImage(
+          source: ImageSource.gallery,
+          maxWidth: 1600,
+          maxHeight: 1600,
+          imageQuality: 85,
+        );
+      } else if (choice == 'file') {
+        FilePickerResult? result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf'],
+        );
+        if (result != null && result.files.single.path != null) {
+          picked = XFile(result.files.single.path!);
+        }
+      }
+
+      if (picked != null) {
         setState(() {
-          _podPhotoFile = XFile(result.files.single.path!);
+          _podPhotoFile = picked;
         });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('تم اختيار الملف بنجاح')),
@@ -250,20 +297,23 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
         status: 'delivered',
         epodPhoto: _podPhotoFile,
       );
-      final history = response['history'] as Map<String, dynamic>?;
 
-      setState(() {
-        _podPhotoBackendPath =
-            history?['photo_path']?.toString() ?? _podPhotoBackendPath;
-      });
+      if (response.containsKey('shipment')) {
+        setState(() {
+          _shipment = response['shipment'];
+          final history = response['history'] as Map<String, dynamic>?;
+          _podPhotoBackendPath = history?['photo_path']?.toString() ?? _podPhotoBackendPath;
+        });
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم تسجيل وثيقة الاستلام بنجاح')),
       );
-      await _loadShipmentData();
+
+      // Refresh details in background
+      _loadShipmentData(showLoading: false);
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('خطأ: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e')));
     } finally {
       setState(() => _isSubmittingPOD = false);
     }
@@ -282,13 +332,7 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
     }
   }
 
-  String _statusLabel(String status) {
-    final step = _timelineSteps.where((s) => s['status'] == status).toList();
-    if (step.isNotEmpty) {
-      return step.first['label'] as String;
-    }
-    return status;
-  }
+  String _statusLabel(String status) => shipmentLifecycleStatusAr(status);
 
   Future<Position?> _tryCurrentPosition() async {
     try {
@@ -300,8 +344,14 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
           perm == LocationPermission.deniedForever) {
         return null;
       }
+      // Try last known position first for speed
+      final lastPos = await Geolocator.getLastKnownPosition();
+      if (lastPos != null) return lastPos;
+
+      // Fast current position with timeout
       return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.medium,
+        desiredAccuracy: LocationAccuracy.low,
+        timeLimit: const Duration(seconds: 3),
       );
     } catch (_) {
       return null;
@@ -311,17 +361,32 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
   Future<void> _updateStatus(String newStatus) async {
     setState(() => _isUpdatingStatus = true);
     try {
+      // Get position in parallel or with fast timeout
       final pos = await _tryCurrentPosition();
-      await ApiService.updateShipmentStatus(
+
+      final response = await ApiService.updateShipmentStatus(
         shipmentId: widget.shipmentId,
         status: newStatus,
         locationLat: pos?.latitude,
         locationLng: pos?.longitude,
       );
 
-      await _loadShipmentData();
+      // Optimistically update the local shipment status from response
+      // if the response contains the shipment object
+      if (response.containsKey('shipment')) {
+        setState(() {
+          _shipment = response['shipment'];
+        });
+      }
+
+      // Background reload history and full data without blocking the main success flow
+      _loadShipmentData(showLoading: false);
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('تم تحديث الحالة إلى: ${_statusLabel(newStatus)}')),
+        SnackBar(
+          content: Text('تم تحديث الحالة إلى: ${_statusLabel(newStatus)}'),
+          duration: const Duration(seconds: 2),
+        ),
       );
     } catch (e) {
       final message = e.toString();
@@ -414,7 +479,9 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
     try {
       // استخدام API التوقيع الموجود في الباكيند
       final response = await http.get(
-        Uri.parse('${ApiService.baseUrl}/admin/get-signed-url?url=${Uri.encodeComponent(path)}'),
+        Uri.parse(
+          '${ApiService.baseUrl}/admin/get-signed-url?url=${Uri.encodeComponent(path)}',
+        ),
         headers: await ApiService.authHeaders(jsonContentType: false),
       );
       if (response.statusCode == 200) {
@@ -434,8 +501,9 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
       return path;
     }
     final apiUri = Uri.parse(ApiService.baseUrl);
-    final origin = '${apiUri.scheme}://${apiUri.host}${apiUri.hasPort ? ':${apiUri.port}' : ''}';
-    
+    final origin =
+        '${apiUri.scheme}://${apiUri.host}${apiUri.hasPort ? ':${apiUri.port}' : ''}';
+
     // التحقق إذا كان المسار عبارة عن مفتاح S3 وليس رابطاً كاملاً
     if (!path.startsWith('http')) {
       // نفضل استخدام endpoint التوقيع في AdminController أو آلية مماثلة لو كانت متوفرة للكل
@@ -444,17 +512,77 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
         return '$origin$path';
       }
       // إذا كان مخزناً كـ Key في S3 (مثل epod/xxx.jpg)
-      return '$origin/api/admin/get-signed-url?url=${Uri.encodeComponent(path)}'; 
+      return '$origin/api/admin/get-signed-url?url=${Uri.encodeComponent(path)}';
     }
-    
+
     return path;
+  }
+
+  Widget _trackingAppBarTitle(
+    BuildContext context,
+    Map<String, dynamic> shipment,
+  ) {
+    final pickup = shipmentAddressPrimaryLine(
+      shipment['pickup_address']?.toString(),
+    );
+    final drop = shipmentAddressPrimaryLine(
+      shipment['dropoff_address']?.toString(),
+    );
+    final company = shipmentShipperDisplayName(shipment);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          '$kShipmentPickupLocationLabelAr: $pickup',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: DarbakColors.text,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          '$kShipmentDropoffLocationLabelAr: $drop',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: DarbakColors.text,
+          ),
+        ),
+        if (company.isNotEmpty) ...[
+          const SizedBox(height: 3),
+          Text(
+            company,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: DarbakColors.textSecondary,
+            ),
+          ),
+        ],
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
+      final preview = widget.shipmentData;
       return Scaffold(
-        appBar: AppBar(title: const Text('متابعة الرحلة')),
+        appBar: AppBar(
+          toolbarHeight: 88,
+          title: _trackingAppBarTitle(context, preview),
+        ),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
@@ -464,9 +592,12 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('متابعة الرحلة'),
+        toolbarHeight: 88,
+        title: _trackingAppBarTitle(context, shipment),
         actions: [
-          if (_chatEnabledStatuses.contains((shipment['status'] ?? '').toString()))
+          if (_chatEnabledStatuses.contains(
+            (shipment['status'] ?? '').toString(),
+          ))
             IconButton(
               onPressed: () {
                 Navigator.of(context).push(
@@ -481,10 +612,7 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
               icon: const Icon(Icons.chat_bubble_rounded),
             ),
         ],
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_forward_ios),
-          onPressed: () => Navigator.pop(context),
-        ),
+        leading: const BackButton(),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -507,7 +635,7 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'الحالة الحالية: ${shipment['status'] ?? 'قيد المعالجة'}',
+                        'الحالة الحالية: ${shipmentLifecycleStatusAr(shipment['status']?.toString())}',
                         style: const TextStyle(
                           color: Colors.orange,
                           fontWeight: FontWeight.w600,
@@ -523,23 +651,49 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
               // Timeline
               _buildTimeline(currentStepIndex),
 
+              if (((_shipment?['contract_pdf_key'] ??
+                              shipment['contract_pdf_key'])
+                          ?.toString()
+                          .trim()
+                          .isNotEmpty ==
+                      true) &&
+                  const {
+                    'assigned',
+                    'at_pickup',
+                    'en_route',
+                    'at_dropoff',
+                    'delivered',
+                  }.contains((shipment['status'] ?? '').toString())) ...[
+                const SizedBox(height: 16),
+                OutlinedButton.icon(
+                  onPressed: _openContract,
+                  icon: const Icon(Icons.picture_as_pdf_outlined),
+                  label: const Text('عرض العقد الإلكتروني'),
+                ),
+              ],
+
               const SizedBox(height: 24),
 
               // Action Button to advance status
               if (_shipment?['status'] != 'delivered' &&
-                  _nextStatusFor((_shipment?['status'] ?? '').toString()) != null)
+                  _nextStatusFor((_shipment?['status'] ?? '').toString()) !=
+                      null)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 16),
                   child: _isUpdatingStatus
                       ? const Center(child: CircularProgressIndicator())
                       : ElevatedButton(
                           onPressed: () => _updateStatus(
-                            _nextStatusFor((_shipment?['status'] ?? '').toString())!,
+                            _nextStatusFor(
+                              (_shipment?['status'] ?? '').toString(),
+                            )!,
                           ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: DarbakColors.primaryGreen,
                             padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                           child: Text(
                             'تحديث الحالة إلى: ${_statusLabel(_nextStatusFor((_shipment?['status'] ?? '').toString())!)}',
@@ -560,14 +714,19 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
                     if (locationUrl.isEmpty) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(
-                          content: Text('إحداثيات الموقع غير متوفرة لهذه الشحنة'),
+                          content: Text(
+                            'إحداثيات الموقع غير متوفرة لهذه الشحنة',
+                          ),
                         ),
                       );
                       return;
                     }
                     final url = Uri.parse(locationUrl);
                     if (await canLaunchUrl(url)) {
-                      await launchUrl(url, mode: LaunchMode.externalApplication);
+                      await launchUrl(
+                        url,
+                        mode: LaunchMode.externalApplication,
+                      );
                     } else {
                       ScaffoldMessenger.of(context).showSnackBar(
                         const SnackBar(content: Text('تعذر فتح الخرائط')),
@@ -591,7 +750,7 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
                 const Divider(),
                 const SizedBox(height: 16),
                 const Text(
-                  'وثيقة الاستلام الإلكترونية (ePOD)',
+                  'توثيق التسليم',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -616,7 +775,11 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  const Icon(Icons.picture_as_pdf, size: 48, color: Colors.red),
+                                  const Icon(
+                                    Icons.picture_as_pdf,
+                                    size: 48,
+                                    color: Colors.red,
+                                  ),
                                   const SizedBox(height: 8),
                                   Text(_podPhotoFile!.name),
                                 ],
@@ -629,13 +792,15 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
                             ),
                     ),
                   ),
-                if (_podPhotoFile == null &&
-                    _podPhotoBackendPath != null)
+                if (_podPhotoFile == null && _podPhotoBackendPath != null)
                   FutureBuilder<String?>(
                     future: _getSignedUrlOrPath(_podPhotoBackendPath!),
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const SizedBox(height: 120, child: Center(child: CircularProgressIndicator()));
+                        return const SizedBox(
+                          height: 120,
+                          child: Center(child: CircularProgressIndicator()),
+                        );
                       }
                       final url = snapshot.data;
                       if (url == null) return const SizedBox.shrink();
@@ -650,12 +815,18 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
                           borderRadius: BorderRadius.circular(12),
                           child: _isPdf(_podPhotoBackendPath)
                               ? ListTile(
-                                  leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
+                                  leading: const Icon(
+                                    Icons.picture_as_pdf,
+                                    color: Colors.red,
+                                  ),
                                   title: const Text('عرض وثيقة PDF'),
                                   onTap: () async {
                                     final uri = Uri.parse(url);
                                     if (await canLaunchUrl(uri)) {
-                                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                      await launchUrl(
+                                        uri,
+                                        mode: LaunchMode.externalApplication,
+                                      );
                                     }
                                   },
                                 )
@@ -667,7 +838,9 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
                                   errorBuilder: (_, __, ___) => const SizedBox(
                                     height: 120,
                                     child: Center(
-                                      child: Text('تعذر تحميل صورة إثبات التسليم'),
+                                      child: Text(
+                                        'تعذر تحميل صورة إثبات التسليم',
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -687,8 +860,7 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
                   ),
-                if (_podPhotoFile != null &&
-                    shipment['status'] == 'at_dropoff')
+                if (_podPhotoFile != null && shipment['status'] == 'at_dropoff')
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: _isSubmittingPOD
@@ -713,17 +885,6 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
                   ),
                 ),
                 const SizedBox(height: 10),
-                if ((_shipment?['contract_pdf_key'] ?? shipment['contract_pdf_key'])
-                        ?.toString()
-                        .trim()
-                        .isNotEmpty ==
-                    true)
-                  OutlinedButton.icon(
-                    onPressed: _openContract,
-                    icon: const Icon(Icons.picture_as_pdf_outlined),
-                    label: const Text('عرض / تنزيل العقد الإلكتروني'),
-                  ),
-                const SizedBox(height: 8),
                 ElevatedButton.icon(
                   onPressed: _openRatePartner,
                   icon: const Icon(Icons.star_rate_rounded),
@@ -753,11 +914,13 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
                 'الوصف',
                 shipment['cargo_description'] ?? 'لا يوجد',
               ),
-              _buildDetailRow('السعر الأساسي', '${shipment['base_price']} ر.س'),
+              _buildPriceDetailRow(
+                'السعر المتفق عليه',
+                shipmentAgreedPriceValue(shipment),
+              ),
               _buildDetailRow(
                 'الموعد المتوقع',
-                shipment['expected_delivery_date']?.toString() ??
-                    'لم يتم تحديده',
+                formatShipmentDateTimeForUi(shipment['expected_delivery_date']),
               ),
               if ((shipment['special_instructions']?.toString().trim() ?? '')
                   .isNotEmpty) ...[
@@ -913,6 +1076,36 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
               style: const TextStyle(
                 fontWeight: FontWeight.w500,
                 color: DarbakColors.dark,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPriceDetailRow(String label, dynamic amount) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: DarbakColors.textSecondary,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: SarPrice(
+                amount: amount,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w500,
+                  color: DarbakColors.dark,
+                ),
               ),
             ),
           ),

@@ -17,7 +17,8 @@ class MapLocationPickerScreen extends StatefulWidget {
   });
 
   @override
-  State<MapLocationPickerScreen> createState() => _MapLocationPickerScreenState();
+  State<MapLocationPickerScreen> createState() =>
+      _MapLocationPickerScreenState();
 }
 
 class _MapLocationPickerScreenState extends State<MapLocationPickerScreen> {
@@ -51,7 +52,9 @@ class _MapLocationPickerScreenState extends State<MapLocationPickerScreen> {
                 initialZoom: 15.0,
                 maxZoom: 18.0,
                 minZoom: 5.0,
-                interactionOptions: const InteractionOptions(flags: InteractiveFlag.all),
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.all,
+                ),
                 // تحديث الإحداثيات عند تحريك الخريطة
                 onPositionChanged: (MapPosition position, bool hasGesture) {
                   if (hasGesture && position.center != null) {
@@ -71,7 +74,8 @@ class _MapLocationPickerScreenState extends State<MapLocationPickerScreen> {
                 // طبقة بيانات OpenStreetMap (مجانية ومفتوحة المصدر)
                 TileLayer(
                   urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.example.darbak', // ضع الـ Package Name الحقيقي هنا
+                  userAgentPackageName:
+                      'com.example.darbak', // ضع الـ Package Name الحقيقي هنا
                 ),
               ],
             ),
@@ -94,7 +98,8 @@ class _MapLocationPickerScreenState extends State<MapLocationPickerScreen> {
               bottom: 20,
               left: 20,
               right: 20,
-              child: DarbakPrimaryButton( // استخدم الويدجت الجاهزة لديكم
+              child: DarbakPrimaryButton(
+                // استخدم الويدجت الجاهزة لديكم
                 label: 'تأكيد الموقع الحالي',
                 icon: Icons.check_circle_outline,
                 onPressed: () {
@@ -102,7 +107,8 @@ class _MapLocationPickerScreenState extends State<MapLocationPickerScreen> {
                   Navigator.pop(context, {
                     'lat': _selectedLocation.latitude,
                     'lng': _selectedLocation.longitude,
-                    'mapsUrl': 'https://www.google.com/maps?q=${_selectedLocation.latitude},${_selectedLocation.longitude}',
+                    'mapsUrl':
+                        'https://www.google.com/maps?q=${_selectedLocation.latitude},${_selectedLocation.longitude}',
                   });
                 },
               ),

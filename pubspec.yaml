@@ -30,12 +30,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   lottie: ^3.1.2
-  location_picker_flutter_map: ^2.0.0
   http: ^1.6.0
   shared_preferences: ^2.2.3
   file_picker: ^8.0.3
@@ -43,8 +44,18 @@ dependencies:
   latlong2: ^0.9.0           # للتعامل مع الإحداثيات (Latitude/Longitude)
   url_launcher: ^6.2.5       # (اختياري) لفتح روابط الخرائط الخارجية
   image_picker: ^0.8.7+6
-  intl: ^0.18.1
+  intl: ^0.20.2
+  characters: ^1.4.0
   geolocator: ^10.1.1
+  pdf: ^3.11.3
+  webview_flutter: ^4.10.0
+  cached_network_image: ^3.4.1
+  shimmer: ^3.0.0
+  socket_io_client: ^3.1.4
+  video_player: ^2.11.1
+  video_compress: ^3.1.4
+  firebase_core: ^4.8.0
+  firebase_auth: ^6.5.0
 
 dev_dependencies:
   flutter_test:
@@ -67,9 +78,14 @@ flutter:
 
   assets:
     - assets/animations/
+    - assets/icons/
     - lib/assets/
+    - assets/noto/
 
   fonts:
+    - family: NotoSansArabic
+      fonts:
+        - asset: assets/noto/NotoSansArabic-Regular.ttf
     - family: 29LT Bukra
       fonts:
         - asset: assets/fonts/29LTBukra-Regular.ttf

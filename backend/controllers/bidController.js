@@ -4,6 +4,31 @@ const Notification = require('../models/Notification');
 const User = require('../models/User');
 const { decryptText } = require('../utils/encryption');
 const pool = require('../config/db');
+const { emitAdminDashboard } = require('../utils/adminRealtime');
+const { isShipmentAuctionStillLive } = require('../utils/auctionLive');
+
+const MAX_MONEY = 99999999.99;
+const SAR_SYMBOL = '⃁';
+
+const parseBidAmount = (value) => {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0 || amount > MAX_MONEY) return null;
+  return Number(amount.toFixed(2));
+};
+
+const parseEstimatedDays = (value) => {
+  const days = Number(value);
+  if (!Number.isInteger(days) || days <= 0 || days > 365) return null;
+  return days;
+};
+
+const expireStaleAuctionBidsSafe = async () => {
+  try {
+    await Bid.expirePendingBidsPastAuctionEnd();
+  } catch (e) {
+    console.warn('[Bid] expireStaleAuctionBidsSafe:', e.message);
+  }
+};
 
 const isLicenseExpired = (expiryDate) => {
   if (!expiryDate) return false;
@@ -17,13 +42,16 @@ const isLicenseExpired = (expiryDate) => {
 
 const createBid = async (req, res) => {
   try {
+    await expireStaleAuctionBidsSafe();
     const { shipmentId, bidAmount, estimatedDays } = req.body;
     const driverId = req.user?.id;
+    const parsedBidAmount = parseBidAmount(bidAmount);
+    const parsedEstimatedDays = parseEstimatedDays(estimatedDays);
 
     console.log('[Bid.createBid] Input:', { shipmentId, driverId, bidAmount, estimatedDays });
 
     // Validate required fields
-    if (!shipmentId || !driverId || !bidAmount || !estimatedDays) {
+    if (!shipmentId || !driverId || parsedBidAmount == null || parsedEstimatedDays == null) {
       return res.status(400).json({ message: 'جميع الحقول مطلوبة' });
     }
     if (req.user?.role !== 'driver') {
@@ -46,13 +74,9 @@ const createBid = async (req, res) => {
     if (shipment.status !== 'bidding' && shipment.status !== 'pending') {
       return res.status(400).json({ message: 'الشحنة غير متاحة للتقديم عليها' });
     }
-    if (shipment.auction_end_time && new Date(shipment.auction_end_time) <= new Date()) {
+    const rawAuction = shipment.auction_end_time;
+    if (rawAuction != null && rawAuction !== '' && !isShipmentAuctionStillLive(shipment)) {
       return res.status(400).json({ message: 'انتهى وقت المزاد لهذه الشحنة' });
-    }
-
-    // Validate bid amount doesn't exceed base price
-    if (Number(bidAmount) > Number(shipment.base_price)) {
-      return res.status(400).json({ message: 'يجب أن يكون المبلغ أقل أو يساوي السعر الأساسي' });
     }
 
     // Check if driver already has a pending bid for this shipment
@@ -65,33 +89,39 @@ const createBid = async (req, res) => {
       return res.status(400).json({ message: 'لديك بالفعل عرض معلق لهذه الشحنة' });
     }
 
-    // Get the current lowest bid for this shipment
-    const [lowestBids] = await pool.execute(
-      'SELECT * FROM bids WHERE shipment_id = ? AND bid_status = ? ORDER BY bid_amount ASC LIMIT 1',
-      [shipmentId, 'pending']
-    );
-
-    // Check if this bid is lower than current best bid
-    if (lowestBids && lowestBids.length > 0) {
-      const currentLowest = lowestBids[0].bid_amount;
-      if (Number(bidAmount) >= Number(currentLowest)) {
-        return res.status(400).json({
-          message: `يجب أن يكون عرضك أقل من أفضل عرض حالي (${currentLowest} ريال)`,
-        });
-      }
+    const otherRoom = await Bid.findActiveParticipationOnOtherShipment(driverId, shipmentId);
+    if (otherRoom) {
+      return res.status(409).json({
+        message:
+          'لديك عرض معلّق على شحنة أخرى. افتح بطاقة تلك الشحنة واضغط «سحب العرض» ثم يمكنك المزايدة هنا.',
+        code: 'SINGLE_BID_ROOM',
+        activeShipmentId: otherRoom.shipment_id,
+      });
     }
 
     // Create the bid in the bids table
-    const bid = await Bid.create({ shipmentId, driverId, bidAmount, estimatedDays });
+    const bid = await Bid.create({
+      shipmentId,
+      driverId,
+      bidAmount: parsedBidAmount,
+      estimatedDays: parsedEstimatedDays,
+    });
 
-    console.log('[Bid.createBid] Bid created:', { bidId: bid.id, driverId, bidAmount });
+    console.log('[Bid.createBid] Bid created:', {
+      bidId: bid.id,
+      driverId,
+      bidAmount: parsedBidAmount,
+      suggestedPrice: shipment.suggested_price ?? shipment.base_price,
+    });
 
     // Notify shipper of new bid
     try {
       await Notification.create({
         user_id: shipment.shipper_id,
         title: 'عرض جديد',
-        message: `حصلت على عرض جديد بسعر ${bidAmount} ريال للشحنة #${shipmentId}`,
+        message: `حصلت على عرض جديد بسعر ${parsedBidAmount} ${SAR_SYMBOL} للشحنة #${shipmentId}`,
+        related_shipment_id: shipmentId,
+        related_bid_id: bid.id,
         is_read: 0,
       });
     } catch (notifError) {
@@ -102,16 +132,24 @@ const createBid = async (req, res) => {
       const { sendPushToUser } = require('../utils/fcmPush');
       await sendPushToUser(shipment.shipper_id, {
         title: 'عرض جديد',
-        body: `عرض جديد بسعر ${bidAmount} ريال على الشحنة #${shipmentId}`,
+        body: `عرض جديد بسعر ${parsedBidAmount} ${SAR_SYMBOL} على الشحنة #${shipmentId}`,
         data: { type: 'new_bid', shipmentId: String(shipmentId), bidId: String(bid.id) },
       });
     } catch (pushErr) {
       console.warn('[Bid.createBid] Push error:', pushErr.message);
     }
 
-    res.status(201).json({ 
-      ...bid, 
-      message: 'تم إضافة عرضك في نظام المناقصة العكسية' 
+    emitAdminDashboard(req, 'bid.created', {
+      bidId: bid.id,
+      shipmentId,
+      driverId,
+      bidAmount: parsedBidAmount,
+    });
+
+    res.status(201).json({
+      ...bid,
+      suggested_price: shipment.suggested_price ?? shipment.base_price,
+      message: 'تم إرسال عرضك بنجاح'
     });
   } catch (error) {
     console.error('[Bid.createBid] Database error:', error.message, 'Code:', error.code, 'SQLState:', error.sqlState);
@@ -119,8 +157,104 @@ const createBid = async (req, res) => {
   }
 };
 
+const getMyActiveBid = async (req, res) => {
+  try {
+    await expireStaleAuctionBidsSafe();
+    if (req.user?.role !== 'driver') {
+      return res.status(403).json({ message: 'هذه الخدمة للسائقين فقط' });
+    }
+    const row = await Bid.findActiveParticipationForDriver(req.user.id);
+    if (!row) {
+      return res.json({ active: false });
+    }
+    return res.json({
+      active: true,
+      bid: {
+        bidId: row.bid_id,
+        shipmentId: row.shipment_id,
+        bidAmount: Number(row.bid_amount),
+        estimatedDays: row.estimated_days,
+        pickupAddress: row.pickup_address,
+        dropoffAddress: row.dropoff_address,
+      },
+    });
+  } catch (error) {
+    console.error('[Bid.getMyActiveBid] Error:', error.message);
+    res.status(500).json({ message: error.message || 'خطأ في جلب العرض النشط' });
+  }
+};
+
+const withdrawMyPendingBid = async (req, res) => {
+  try {
+    await expireStaleAuctionBidsSafe();
+    if (req.user?.role !== 'driver') {
+      return res.status(403).json({ message: 'فقط السائق يمكنه سحب العرض' });
+    }
+    const driverId = req.user.id;
+    const rawSid = req.body?.shipmentId;
+    const shipmentIdFromBody =
+      rawSid === undefined || rawSid === null || rawSid === '' ? null : Number(rawSid);
+    if (shipmentIdFromBody != null && !Number.isFinite(shipmentIdFromBody)) {
+      return res.status(400).json({ message: 'رقم الشحنة غير صالح' });
+    }
+
+    let targetShipmentId = shipmentIdFromBody;
+    let driverBid;
+
+    if (targetShipmentId != null) {
+      const [driverBids] = await pool.execute(
+        'SELECT * FROM bids WHERE shipment_id = ? AND driver_id = ? AND bid_status = ?',
+        [targetShipmentId, driverId, 'pending']
+      );
+      if (!driverBids || driverBids.length === 0) {
+        return res.status(404).json({ message: 'لا يوجد عرض معلق لك على هذه الشحنة' });
+      }
+      driverBid = driverBids[0];
+    } else {
+      const active = await Bid.findActiveParticipationForDriver(driverId);
+      if (!active) {
+        return res.status(404).json({ message: 'لا يوجد لديك عرض معلق لسحبه' });
+      }
+      targetShipmentId = active.shipment_id;
+      driverBid = await Bid.findById(active.bid_id);
+    }
+
+    const shipmentForAuction = await Shipment.findById(targetShipmentId);
+
+    const [allBids] = await pool.execute(
+      'SELECT * FROM bids WHERE shipment_id = ? AND bid_status = ? ORDER BY bid_amount ASC LIMIT 1',
+      [targetShipmentId, 'pending']
+    );
+    if (
+      isShipmentAuctionStillLive(shipmentForAuction) &&
+      allBids &&
+      allBids.length > 0 &&
+      Number(allBids[0].driver_id) === Number(driverId)
+    ) {
+      return res.status(403).json({
+        message: 'أنت الفائز الحالي بأقل سعر. لا يمكنك سحب العرض الآن.',
+      });
+    }
+
+    const updated = await Bid.setStatus(driverBid.id, 'rejected');
+    if (!updated) {
+      return res.status(500).json({ message: 'تعذّر تحديث حالة العرض' });
+    }
+
+    res.json({
+      message: 'تم سحب عرضك بنجاح',
+      shipmentId: targetShipmentId,
+      bidId: driverBid.id,
+    });
+  } catch (error) {
+    console.error('[Bid.withdrawMyPendingBid] Error:', error.message);
+    res.status(500).json({ message: error.message || 'خطأ في سحب العرض' });
+  }
+};
+
 const getBidsByShipment = async (req, res) => {
   try {
+    await expireStaleAuctionBidsSafe();
     const { shipmentId } = req.params;
 
     console.log('[Bid.getBidsByShipment] Fetching bids for shipmentId:', shipmentId);
@@ -261,6 +395,8 @@ const acceptBid = async (req, res) => {
           user_id: driverId,
           title: 'تم قبول عرضك',
           message: `تم قبول عرضك للشحنة رقم ${shipmentId}`,
+          related_shipment_id: shipmentId,
+          related_bid_id: bidId,
           is_read: 0,
         });
         console.log('[Bid.acceptBid] Driver acceptance notification sent');
@@ -292,6 +428,8 @@ const acceptBid = async (req, res) => {
             user_id: otherBid.driver_id,
             title: 'تم رفض عرضك',
             message: `تم اختيار عرض آخر للشحنة رقم ${shipmentId}`,
+            related_shipment_id: shipmentId,
+            related_bid_id: bidId,
             is_read: 0,
           });
         } catch (notifError) {
@@ -302,20 +440,77 @@ const acceptBid = async (req, res) => {
       console.log('[Bid.acceptBid] Rejection notifications sent to', otherBids.length, 'drivers');
 
       let contract_pdf_key = null;
+      let contract_id = null;
       try {
         const { generateAndStoreShipmentContract } = require('../services/contractPdfService');
         const shipperUser = await User.findById(shipment.shipper_id);
         const driverUser = await User.findById(driverId);
         const shipmentForPdf = { ...shipment, status: 'assigned', driver_id: driverId };
-        contract_pdf_key = await generateAndStoreShipmentContract({
+        const contractRow = await generateAndStoreShipmentContract({
           shipment: shipmentForPdf,
           bid,
           shipperName: shipperUser?.full_name,
           driverName: driverUser?.full_name,
         });
+        if (contractRow?.pdf_key) {
+          contract_pdf_key = contractRow.pdf_key;
+          contract_id = contractRow.contract_id ?? null;
+        }
       } catch (cErr) {
         console.warn('[Bid.acceptBid] contract generation:', cErr.message);
       }
+
+      if (contract_pdf_key) {
+        const amt = Number(bid.bid_amount).toLocaleString('ar-SA', {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 2,
+        });
+        const contractMsg = `تم إنشاء عقد للشحنة #${shipmentId} بقيمة ${amt} ${SAR_SYMBOL}`;
+        const pushBody = `تم إنشاء عقد للشحنة #${shipmentId} بقيمة ${amt} ${SAR_SYMBOL}`;
+        try {
+          await Notification.create({
+            user_id: shipment.shipper_id,
+            title: 'عقد إلكتروني',
+            message: contractMsg,
+            related_shipment_id: shipmentId,
+            related_bid_id: bidId,
+            is_read: 0,
+          });
+          await Notification.create({
+            user_id: driverId,
+            title: 'عقد إلكتروني',
+            message: contractMsg,
+            related_shipment_id: shipmentId,
+            related_bid_id: bidId,
+            is_read: 0,
+          });
+        } catch (notifErr) {
+          console.warn('[Bid.acceptBid] contract notification error:', notifErr.message);
+        }
+        try {
+          const { sendPushToUser } = require('../utils/fcmPush');
+          const pushPayload = {
+            title: 'عقد إلكتروني',
+            body: pushBody,
+            data: {
+              type: 'contract_created',
+              shipmentId: String(shipmentId),
+              contractId: contract_id != null ? String(contract_id) : '',
+              pdfKey: String(contract_pdf_key),
+            },
+          };
+          await sendPushToUser(shipment.shipper_id, pushPayload);
+          await sendPushToUser(driverId, pushPayload);
+      } catch (pushErr) {
+        console.warn('[Bid.acceptBid] contract push error:', pushErr.message);
+      }
+      }
+
+      emitAdminDashboard(req, 'bid.accepted', {
+        bidId,
+        shipmentId,
+        driverId,
+      });
 
       return res.status(200).json({
         success: true,
@@ -325,6 +520,8 @@ const acceptBid = async (req, res) => {
         driverId,
         status: 'accepted',
         contract_pdf_key,
+        contract_id,
+        bid_amount: bid.bid_amount,
       });
     } finally {
       await connection.release();
@@ -339,4 +536,10 @@ const acceptBid = async (req, res) => {
   }
 };
 
-module.exports = { createBid, getBidsByShipment, acceptBid };
+module.exports = {
+  createBid,
+  getBidsByShipment,
+  acceptBid,
+  getMyActiveBid,
+  withdrawMyPendingBid,
+};

@@ -8,7 +8,7 @@ class BidModel {
   final String driverName;
   final String? licenseNo;
   final String? phone;
-  final double driverRating;
+  final double? driverRating;
   final int ratingCount;
 
   BidModel({
@@ -26,18 +26,31 @@ class BidModel {
   });
 
   factory BidModel.fromJson(Map<String, dynamic> json) {
+    double? parseRating(dynamic value) {
+      if (value == null) return null;
+      final parsed = value is num
+          ? value.toDouble()
+          : double.tryParse(value.toString());
+      if (parsed == null || !parsed.isFinite || parsed <= 0) return null;
+      return parsed.clamp(0, 5).toDouble();
+    }
+
     return BidModel(
       id: int.tryParse(json['id']?.toString() ?? '') ?? 0,
       shipmentId: int.tryParse(json['shipment_id']?.toString() ?? '') ?? 0,
       driverId: int.tryParse(json['driver_id']?.toString() ?? '') ?? 0,
-      bidAmount: double.tryParse(json['bid_amount'].toString()) ?? 0.0,
-      estimatedDays: int.tryParse(json['estimated_days'].toString()) ?? 0,
+      bidAmount: double.tryParse(json['bid_amount']?.toString() ?? '') ?? 0.0,
+      estimatedDays:
+          int.tryParse(json['estimated_days']?.toString() ?? '') ?? 0,
       bidStatus: json['bid_status']?.toString() ?? '',
-      driverName: json['driver_name']?.toString() ?? json['full_name']?.toString() ?? 'سائق',
+      driverName:
+          json['driver_name']?.toString() ??
+          json['full_name']?.toString() ??
+          'سائق',
       licenseNo: json['license_no']?.toString(),
       phone: json['phone']?.toString(),
-      driverRating: double.tryParse(json['driver_rating'].toString()) ?? 0.0,
-      ratingCount: int.tryParse(json['rating_count'].toString()) ?? 0,
+      driverRating: parseRating(json['driver_rating']),
+      ratingCount: int.tryParse(json['rating_count']?.toString() ?? '') ?? 0,
     );
   }
 

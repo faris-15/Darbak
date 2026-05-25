@@ -1,6 +1,7 @@
 const pool = require('../config/db');
 const Bid = require('../models/Bid');
 const Shipment = require('../models/Shipment');
+const { isShipmentAuctionStillLive } = require('../utils/auctionLive');
 
 /**
  * A "Bidding Room" is the collection of all bids for a single shipment.
@@ -13,6 +14,12 @@ const enterBiddingRoom = async (req, res) => {
     const { driverId, bidAmount, estimatedDays } = req.body;
 
     console.log('[BiddingRoom.enterBiddingRoom] Input:', { shipmentId, driverId, bidAmount, estimatedDays });
+
+    try {
+      await Bid.expirePendingBidsPastAuctionEnd();
+    } catch (e) {
+      console.warn('[BiddingRoom] expirePendingBidsPastAuctionEnd:', e.message);
+    }
 
     // Validate inputs
     if (!shipmentId || !driverId || !bidAmount || !estimatedDays) {
@@ -30,6 +37,11 @@ const enterBiddingRoom = async (req, res) => {
       return res.status(400).json({ message: 'هذه الشحنة لا تقبل عروض جديدة' });
     }
 
+    const rawAuction = shipment.auction_end_time;
+    if (rawAuction != null && rawAuction !== '' && !isShipmentAuctionStillLive(shipment)) {
+      return res.status(400).json({ message: 'انتهى وقت المزاد لهذه الشحنة' });
+    }
+
     // Check if driver already has a pending bid for this shipment
     const existingBid = await pool.execute(
       'SELECT * FROM bids WHERE shipment_id = ? AND driver_id = ? AND bid_status = ?',
@@ -39,6 +51,16 @@ const enterBiddingRoom = async (req, res) => {
 
     if (existingBids && existingBids.length > 0) {
       return res.status(400).json({ message: 'لديك بالفعل عرض معلق لهذه الشحنة' });
+    }
+
+    const otherRoom = await Bid.findActiveParticipationOnOtherShipment(driverId, shipmentId);
+    if (otherRoom) {
+      return res.status(409).json({
+        message:
+          'لديك عرض معلّق على شحنة أخرى. افتح بطاقة تلك الشحنة واضغط «سحب العرض» ثم يمكنك المزايدة هنا.',
+        code: 'SINGLE_BID_ROOM',
+        activeShipmentId: otherRoom.shipment_id,
+      });
     }
 
     // Place the bid
@@ -67,6 +89,14 @@ const exitBiddingRoom = async (req, res) => {
 
     console.log('[BiddingRoom.exitBiddingRoom] Input:', { shipmentId, driverId });
 
+    try {
+      await Bid.expirePendingBidsPastAuctionEnd();
+    } catch (e) {
+      console.warn('[BiddingRoom] expirePendingBidsPastAuctionEnd:', e.message);
+    }
+
+    const shipment = await Shipment.findById(shipmentId);
+
     // Find driver's bid for this shipment
     const [driverBids] = await pool.execute(
       'SELECT * FROM bids WHERE shipment_id = ? AND driver_id = ? AND bid_status = ?',
@@ -86,7 +116,12 @@ const exitBiddingRoom = async (req, res) => {
     );
 
     // Check if driver is the lowest bidder
-    if (allBids && allBids.length > 0 && allBids[0].driver_id == driverId) {
+    if (
+      isShipmentAuctionStillLive(shipment) &&
+      allBids &&
+      allBids.length > 0 &&
+      Number(allBids[0].driver_id) === Number(driverId)
+    ) {
       return res.status(403).json({
         message: 'أنت الفائز الحالي بأقل سعر. لا يمكنك مغادرة الغرفة الآن.',
       });

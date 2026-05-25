@@ -1,21 +1,68 @@
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
+import 'widgets/profile_avatar.dart';
+
+class DarbakSurface extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final EdgeInsetsGeometry? margin;
+  final Color color;
+  final Color borderColor;
+  final double radius;
+  final List<BoxShadow>? boxShadow;
+  final double? width;
+
+  const DarbakSurface({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(DarbakSpacing.lg),
+    this.margin,
+    this.color = DarbakColors.card,
+    this.borderColor = DarbakColors.borderSoft,
+    this.radius = DarbakRadius.lg,
+    this.boxShadow,
+    this.width,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      margin: margin,
+      padding: padding,
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(radius),
+        border: Border.all(color: borderColor),
+        boxShadow: boxShadow ?? DarbakShadows.soft,
+      ),
+      child: child,
+    );
+  }
+}
 
 class DarbakPrimaryButton extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
   final IconData? icon;
+  final IconAlignment iconAlignment;
+
+  /// When set (e.g. `0.82`), the button uses this fraction of the parent’s max
+  /// width and stays centered — used on auth screens to match design margins.
+  final double? widthFactor;
 
   const DarbakPrimaryButton({
     super.key,
     required this.label,
     this.onPressed,
     this.icon,
+    this.iconAlignment = IconAlignment.end,
+    this.widthFactor,
   });
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    final inner = SizedBox(
       height: 52,
       width: double.infinity,
       child: ElevatedButton(
@@ -23,21 +70,39 @@ class DarbakPrimaryButton extends StatelessWidget {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (icon != null) ...[
+            if (icon != null && iconAlignment == IconAlignment.start) ...[
               Icon(icon, size: 22),
               const SizedBox(width: 8),
             ],
-            Text(
-              label,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ),
+            if (icon != null && iconAlignment == IconAlignment.end) ...[
+              const SizedBox(width: 8),
+              Icon(icon, size: 22),
+            ],
           ],
         ),
       ),
     );
+    final f = widthFactor;
+    if (f != null) {
+      return FractionallySizedBox(
+        widthFactor: f.clamp(0.2, 1.0),
+        alignment: Alignment.center,
+        child: inner,
+      );
+    }
+    return inner;
   }
 }
 
@@ -45,11 +110,7 @@ class DarbakOutlinedButton extends StatelessWidget {
   final String label;
   final VoidCallback? onPressed;
 
-  const DarbakOutlinedButton({
-    super.key,
-    required this.label,
-    this.onPressed,
-  });
+  const DarbakOutlinedButton({super.key, required this.label, this.onPressed});
 
   @override
   Widget build(BuildContext context) {
@@ -65,8 +126,10 @@ class DarbakOutlinedButton extends StatelessWidget {
         ),
         child: Text(
           label,
-          style: const TextStyle(
-            color: DarbakColors.primaryGreen,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: DarbakColors.primary,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -79,22 +142,17 @@ class DarbakSectionTitle extends StatelessWidget {
   final String title;
   final String? subtitle;
 
-  const DarbakSectionTitle({
-    super.key,
-    required this.title,
-    this.subtitle,
-  });
+  const DarbakSectionTitle({super.key, required this.title, this.subtitle});
 
   @override
   Widget build(BuildContext context) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           title,
-          textAlign: TextAlign.right,
-          style: const TextStyle(
-            fontSize: 20,
+          textAlign: TextAlign.start,
+          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
             fontWeight: FontWeight.bold,
             color: DarbakColors.dark,
           ),
@@ -103,11 +161,10 @@ class DarbakSectionTitle extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             subtitle!,
-            textAlign: TextAlign.right,
-            style: const TextStyle(
-              fontSize: 13,
-              color: DarbakColors.textSecondary,
-            ),
+            textAlign: TextAlign.start,
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: DarbakColors.textSecondary),
           ),
         ],
       ],
@@ -133,19 +190,17 @@ class DarbakAuthTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: TextField(
-        controller: controller,
-        obscureText: isPassword,
-        keyboardType: keyboardType,
-        decoration: InputDecoration(
-          hintText: hint,
-          prefixIcon: prefixIcon != null
-              ? Icon(prefixIcon, color: DarbakColors.primaryGreen)
-              : null,
-        ),
-        textAlign: TextAlign.right,
+    return TextField(
+      controller: controller,
+      obscureText: isPassword,
+      keyboardType: keyboardType,
+      textAlign: TextAlign.start,
+      style: Theme.of(context).textTheme.bodyMedium,
+      decoration: InputDecoration(
+        hintText: hint,
+        prefixIcon: prefixIcon != null
+            ? Icon(prefixIcon, color: DarbakColors.primary)
+            : null,
       ),
     );
   }
@@ -164,11 +219,10 @@ class DarbakLogoutBarButton extends StatelessWidget {
       width: double.infinity,
       child: ElevatedButton.icon(
         onPressed: onPressed,
-        icon: const Icon(Icons.logout_rounded, size: 22, color: Colors.white),
-        label: const Text(
+
+        label: Text(
           'تسجيل الخروج',
-          style: TextStyle(
-            fontSize: 16,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
             fontWeight: FontWeight.w600,
             color: Colors.white,
           ),
@@ -189,21 +243,12 @@ class DarbakLogoutBarButton extends StatelessWidget {
 class DarbakProfileAvatar extends StatelessWidget {
   final IconData icon;
 
-  const DarbakProfileAvatar({
-    super.key,
-    this.icon = Icons.person_rounded,
-  });
+  const DarbakProfileAvatar({super.key, this.icon = Icons.person_rounded});
 
   @override
   Widget build(BuildContext context) {
-    return CircleAvatar(
-      radius: 46,
-      backgroundColor: DarbakColors.lightBackground,
-      child: Icon(
-        icon,
-        size: 48,
-        color: DarbakColors.primaryGreen,
-      ),
+    return ProfileAvatar(
+      role: icon == Icons.domain_rounded ? 'shipper' : 'driver',
     );
   }
 }

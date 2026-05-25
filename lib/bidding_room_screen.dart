@@ -1,20 +1,12 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'api_service.dart';
+import 'app_theme.dart';
+import 'app_widgets.dart';
 import 'models/bid_model.dart';
-
-class AppColors {
-  static const primary = Color(0xff168A57);
-  static const primaryDark = Color(0xff0E6D44);
-  static const background = Color(0xffF5F7FA);
-  static const card = Colors.white;
-  static const border = Color(0xffE6E9EF);
-  static const text = Color(0xff1B1F24);
-  static const subText = Color(0xff6B7280);
-  static const danger = Color(0xffD94C4C);
-  static const orange = Color(0xffF59E0B);
-  static const lightGreen = Color(0xffE9F8F0);
-  static const success = Color(0xff79C96B);
-}
+import 'utils/sar_formatter.dart';
+import 'widgets/sar_price.dart';
 
 class BidDetailsScreen extends StatefulWidget {
   final int shipmentId;
@@ -47,12 +39,21 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
   @override
   void initState() {
     super.initState();
-    final basePrice = widget.shipmentData['base_price'] ?? 0;
-    _priceController.text = basePrice.toString();
+    final suggestedPrice = _suggestedPrice;
+    _priceController.text = suggestedPrice > 0
+        ? suggestedPrice.toStringAsFixed(0)
+        : '';
     _daysController.text = '5';
     _loadExistingBids();
     _checkLicenseExpiry();
   }
+
+  double get _suggestedPrice =>
+      SarFormatter.parse(
+        widget.shipmentData['suggested_price'] ??
+            widget.shipmentData['base_price'],
+      ) ??
+      0;
 
   Future<void> _checkLicenseExpiry() async {
     try {
@@ -76,12 +77,13 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
       setState(() {
         existingBids = bids;
         if (bids.isNotEmpty) {
-          // Assuming bids are sorted by bid_amount ASC, first one is lowest
-          lowestBid = bids[0].bidAmount;
+          lowestBid = bids
+              .map((bid) => bid.bidAmount)
+              .reduce((value, element) => value < element ? value : element);
         }
       });
     } catch (e) {
-      print('Error loading bids: $e');
+      debugPrint('Error loading bids: $e');
     }
   }
 
@@ -90,24 +92,13 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
       return 'الرجاء إدخال المبلغ';
     }
 
-    final price = double.tryParse(priceText);
+    final price = SarFormatter.parse(priceText);
     if (price == null || price <= 0) {
       return 'الرجاء إدخال مبلغ صحيح';
     }
 
-    final basePrice =
-        double.tryParse(widget.shipmentData['base_price'].toString()) ?? 0;
-
-    if (price > basePrice) {
-      return 'يجب أن يكون المبلغ أقل أو يساوي السعر الأساسي (${basePrice.toStringAsFixed(2)} ر.س)';
-    }
-
-    if (lowestBid != null && price >= lowestBid!) {
-      return 'يجب أن يكون عرضك أقل من أفضل عرض حالي (${lowestBid!.toStringAsFixed(2)} ر.س)';
-    }
-
-    if (price < basePrice * 0.5) {
-      return 'العرض يبدو منخفضاً جداً';
+    if (price > SarFormatter.maxDatabaseAmount) {
+      return 'المبلغ يتجاوز الحد المسموح به';
     }
 
     return '';
@@ -118,7 +109,7 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('خطأ: لم يتم العثور على بيانات السائق'),
-          backgroundColor: AppColors.danger,
+          backgroundColor: DarbakColors.danger,
         ),
       );
       return;
@@ -130,7 +121,7 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
           content: Text(
             'انتهت صلاحية رخصة القيادة. لا يمكنك تقديم عروض حتى تجدد الرخصة.',
           ),
-          backgroundColor: AppColors.danger,
+          backgroundColor: DarbakColors.danger,
         ),
       );
       return;
@@ -144,7 +135,7 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(error),
-          backgroundColor: AppColors.danger,
+          backgroundColor: DarbakColors.danger,
           duration: const Duration(seconds: 3),
         ),
       );
@@ -155,7 +146,7 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('الرجاء الموافقة على الشروط والأحكام'),
-          backgroundColor: AppColors.danger,
+          backgroundColor: DarbakColors.danger,
         ),
       );
       return;
@@ -167,8 +158,11 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
     });
 
     try {
-      final bidAmount = double.parse(_priceController.text);
+      final bidAmount = SarFormatter.parse(_priceController.text)!;
       final estimatedDays = int.tryParse(_daysController.text) ?? 5;
+      if (estimatedDays <= 0) {
+        throw DarbakException('مدة التسليم المتوقعة غير صحيحة');
+      }
 
       await ApiService.enterBiddingRoom(
         widget.shipmentId,
@@ -190,14 +184,17 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
             return AlertDialog(
               title: const Row(
                 children: [
-                  Icon(Icons.check_circle_outline_rounded,
-                      color: AppColors.success, size: 28),
+                  Icon(
+                    Icons.check_circle_outline_rounded,
+                    color: DarbakColors.success,
+                    size: 28,
+                  ),
                   SizedBox(width: 12),
                   Text('تم إرسال العرض بنجاح'),
                 ],
               ),
               content: const Text(
-                'تم قبول عرضك في نظام المناقصة العكسية. سيتم إخطارك عند قبول عرضك.',
+                'تم إرسال عرضك للشركة. سيتم إخطارك عند قبول العرض.',
                 style: TextStyle(fontSize: 15, height: 1.6),
               ),
               actions: [
@@ -207,7 +204,7 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
                     Navigator.pop(context); // Return to previous screen
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: DarbakColors.primary,
                   ),
                   child: const Text('العودة إلى الشحنات'),
                 ),
@@ -218,15 +215,16 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
       }
     } catch (e) {
       if (mounted) {
+        final msg = e is DarbakException ? e.message : e.toString();
         setState(() {
           isSubmitting = false;
-          validationError = e.toString();
+          validationError = msg;
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('خطأ: $e'),
-            backgroundColor: AppColors.danger,
+            content: Text('خطأ: $msg'),
+            backgroundColor: DarbakColors.danger,
             duration: const Duration(seconds: 4),
           ),
         );
@@ -239,9 +237,72 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
     return address.split(',')[0].trim();
   }
 
+  double? _readDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '');
+  }
+
   String _calculateDistance() {
-    // Placeholder - would calculate actual distance from coordinates
-    return '950 كم';
+    final storedDistance = _readDouble(
+      widget.shipmentData['distance_km'] ??
+          widget.shipmentData['distanceKm'] ??
+          widget.shipmentData['distance'],
+    );
+    if (storedDistance != null && storedDistance > 0) {
+      return '${storedDistance.toStringAsFixed(0)} كم';
+    }
+
+    final pickupLat = _readDouble(widget.shipmentData['pickup_lat']);
+    final pickupLng = _readDouble(widget.shipmentData['pickup_lng']);
+    final dropoffLat = _readDouble(widget.shipmentData['dropoff_lat']);
+    final dropoffLng = _readDouble(widget.shipmentData['dropoff_lng']);
+    if ([pickupLat, pickupLng, dropoffLat, dropoffLng].any((v) => v == null)) {
+      return 'المسافة غير متاحة';
+    }
+
+    const earthRadiusKm = 6371.0;
+    final dLat = _degreesToRadians(dropoffLat! - pickupLat!);
+    final dLng = _degreesToRadians(dropoffLng! - pickupLng!);
+    final a =
+        math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(_degreesToRadians(pickupLat)) *
+            math.cos(_degreesToRadians(dropoffLat)) *
+            math.sin(dLng / 2) *
+            math.sin(dLng / 2);
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    return '${(earthRadiusKm * c).round()} كم';
+  }
+
+  double _degreesToRadians(double degrees) => degrees * math.pi / 180;
+
+  String _formatDeliveryDate(dynamic value) {
+    final raw = value?.toString().trim();
+    if (raw == null || raw.isEmpty) return 'غير محدد';
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) {
+      return raw.replaceAll('T', ' ').replaceAll(RegExp(r'\.000Z$|Z$'), '');
+    }
+
+    final local = parsed.isUtc ? parsed.toLocal() : parsed;
+    final date =
+        '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
+    final time =
+        '${local.hour.toString().padLeft(2, '0')}:${local.minute.toString().padLeft(2, '0')}';
+    return '$date - $time';
+  }
+
+  String _formatAmount(dynamic amount, {int decimalDigits = 2}) {
+    return SarFormatter.format(amount, decimalDigits: decimalDigits);
+  }
+
+  String _comparisonLabel(double bidAmount, double suggestedPrice) {
+    if (suggestedPrice <= 0) return 'لا يوجد سعر مقترح للمقارنة';
+    final difference = bidAmount - suggestedPrice;
+    if (difference.abs() < 0.01) return 'مطابق للسعر المقترح';
+
+    final percent = (difference.abs() / suggestedPrice) * 100;
+    final direction = difference > 0 ? 'أعلى' : 'أقل';
+    return '$direction من السعر المقترح بـ ${_formatAmount(difference.abs())} (${percent.toStringAsFixed(1)}%)';
   }
 
   @override
@@ -253,389 +314,553 @@ class _BidDetailsScreenState extends State<BidDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final basePrice =
-        double.tryParse(widget.shipmentData['base_price'].toString()) ?? 0;
+    final suggestedPrice = _suggestedPrice;
+    final typedBid = SarFormatter.parse(_priceController.text);
     final cityFrom = _getCityDisplay(widget.shipmentData['pickup_address']);
     final cityTo = _getCityDisplay(widget.shipmentData['dropoff_address']);
     final distance = _calculateDistance();
+    final deliveryDate = _formatDeliveryDate(
+      widget.shipmentData['expected_delivery_date'],
+    );
 
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: Scaffold(
-        backgroundColor: AppColors.background,
-        appBar: AppBar(
-          elevation: 0,
-          backgroundColor: AppColors.background,
-          foregroundColor: AppColors.text,
-          centerTitle: false,
-          title: const Text(
-            'ملخص الشحنة',
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              fontSize: 20,
-            ),
-          ),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new_rounded),
-            onPressed: () => Navigator.pop(context),
-          ),
-        ),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            _sectionCard(
-              child: Column(
-                children: [
-                  Row(
-                    children: const [
-                      Icon(Icons.arrow_forward, color: AppColors.text),
-                      SizedBox(width: 8),
-                      Text(
-                        'غرفة المناقصة',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w800,
-                        ),
+    return Scaffold(
+      backgroundColor: DarbakColors.background,
+      appBar: AppBar(
+        elevation: 0,
+        backgroundColor: DarbakColors.background,
+        foregroundColor: DarbakColors.text,
+        centerTitle: false,
+        title: const Text('ملخص الشحنة'),
+        leading: const BackButton(),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _sectionCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text(
+                  'غرفة المناقصة',
+                  textAlign: TextAlign.start,
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 18),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xffF7F9FB),
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(color: DarbakColors.borderSoft),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          _LocationPin(
+                            icon: Icons.place_outlined,
+                            color: DarbakColors.primary,
+                          ),
+                          const Expanded(
+                            child: Divider(
+                              color: Color(0xffCBD5E1),
+                              thickness: 1.3,
+                              indent: 10,
+                              endIndent: 10,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 7,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(
+                                color: DarbakColors.borderSoft,
+                              ),
+                            ),
+                            child: Text(
+                              distance,
+                              style: const TextStyle(
+                                color: DarbakColors.primaryDark,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                          const Expanded(
+                            child: Divider(
+                              color: Color(0xffCBD5E1),
+                              thickness: 1.3,
+                              indent: 10,
+                              endIndent: 10,
+                            ),
+                          ),
+                          const _LocationPin(
+                            icon: Icons.my_location_rounded,
+                            color: DarbakColors.text,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Expanded(
+                            child: _RouteCityBlock(label: 'إلى', city: cityTo),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: _RouteCityBlock(
+                              label: 'من',
+                              city: cityFrom,
+                              alignEnd: true,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _BidMetaItem(
+                              icon: Icons.inventory_2_outlined,
+                              text:
+                                  '${widget.shipmentData['weight_kg'] ?? 0} طن',
+                            ),
+                          ),
+                          Expanded(
+                            child: _BidMetaItem(
+                              icon: Icons.calendar_today_outlined,
+                              text: deliveryDate,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _BidMetaItem(
+                              icon: Icons.local_shipping_outlined,
+                              text:
+                                  widget.shipmentData['cargo_description'] ??
+                                  'بضائع عامة',
+                            ),
+                          ),
+                          Expanded(
+                            child: _BidMetaItem(
+                              icon: Icons.payments_outlined,
+                              text: lowestBid != null
+                                  ? 'أقل عرض: ${_formatAmount(lowestBid, decimalDigits: 0)}'
+                                  : 'لا توجد عروض بعد',
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                  const SizedBox(height: 18),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xffF3F4F6),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(Icons.location_on_outlined,
-                                color: AppColors.subText),
-                            const SizedBox(width: 8),
-                            const Expanded(
-                              child: Divider(color: AppColors.subText),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              distance,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                color: AppColors.subText,
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            const Expanded(
-                              child: Divider(color: AppColors.subText),
-                            ),
-                            const SizedBox(width: 8),
-                            const Icon(Icons.place_outlined,
-                                color: AppColors.text),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              cityTo,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 18,
-                              ),
-                            ),
-                            Text(
-                              cityFrom,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                fontSize: 18,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 18),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _BidMetaItem(
-                                icon: Icons.inventory_2_outlined,
-                                text:
-                                    '${widget.shipmentData['weight_kg'] ?? 0} طن',
-                              ),
-                            ),
-                            Expanded(
-                              child: _BidMetaItem(
-                                icon: Icons.calendar_today_outlined,
-                                text: widget.shipmentData['expected_delivery_date'] ??
-                                    '15 يناير 2025',
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _BidMetaItem(
-                                icon: Icons.local_shipping_outlined,
-                                text: widget.shipmentData['cargo_description'] ??
-                                    'بضائع عامة',
-                              ),
-                            ),
-                            Expanded(
-                              child: _BidMetaItem(
-                                icon: Icons.payments_outlined,
-                                text:
-                                    'أقل عرض حالي: ${lowestBid != null ? lowestBid!.toStringAsFixed(0) : basePrice.toStringAsFixed(0)} ر.س',
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          widget.shipmentData['cargo_description'] ??
-                              'معلومات عن البضاعة',
-                          style: const TextStyle(
-                            color: AppColors.text,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-            const SizedBox(height: 14),
-            _sectionCard(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Icon(Icons.warning_amber_rounded, color: AppColors.danger),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'تنبيه: يمكنك تقديم عرض واحد فقط على هذه الشحنة، وعند إرسال العرض يصبح ملزماً.',
-                      style: TextStyle(
-                        fontSize: 15,
-                        height: 1.7,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            _sectionCard(
-              child: Column(
-                children: [
-                  const Align(
-                    alignment: Alignment.centerRight,
-                    child: Text(
-                      'أدخل قيمة عرضك النهائي',
-                      style: TextStyle(
-                        fontSize: 21,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 18,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.orange,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Text(
-                          'ر.س ',
-                          style: TextStyle(
-                            fontSize: 26,
-                            fontWeight: FontWeight.w900,
-                            color: Colors.black87,
-                          ),
-                        ),
-                        Expanded(
-                          child: TextField(
-                            controller: _priceController,
-                            textAlign: TextAlign.center,
-                            keyboardType: TextInputType.number,
-                            style: const TextStyle(
-                              fontSize: 30,
-                              fontWeight: FontWeight.w900,
-                              color: Colors.black87,
-                            ),
-                            decoration: const InputDecoration(
-                              isCollapsed: true,
-                              border: InputBorder.none,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    'السعر الأساسي: ${basePrice.toStringAsFixed(0)} ر.س',
-                    style: const TextStyle(
+          ),
+          const SizedBox(height: 14),
+          _sectionCard(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Icon(Icons.warning_amber_rounded, color: DarbakColors.danger),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'تنبيه: يمكنك تقديم عرض واحد فقط على هذه الشحنة، وعند إرسال العرض يصبح ملزماً.',
+                    style: TextStyle(
                       fontSize: 15,
-                      color: AppColors.subText,
+                      height: 1.7,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  if (lowestBid != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        'أقل عرض حالي: ${lowestBid!.toStringAsFixed(0)} ر.س',
-                        style: const TextStyle(
-                          fontSize: 15,
-                          color: AppColors.danger,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  const SizedBox(height: 16),
-                  Row(
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          _sectionCard(
+            child: Column(
+              children: [
+                const Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    'أدخل قيمة عرضك النهائي',
+                    style: TextStyle(fontSize: 21, fontWeight: FontWeight.w800),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 18,
+                  ),
+                  decoration: BoxDecoration(
+                    color: DarbakColors.orange,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      const SarIcon(size: 26, color: Colors.black87),
+                      const SizedBox(width: 8),
                       Expanded(
-                        child: _priceSuggestionButton(
-                          '${(basePrice * 0.95).toStringAsFixed(0)}',
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _priceSuggestionButton(
-                          '${(basePrice * 0.90).toStringAsFixed(0)}',
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _priceSuggestionButton(
-                          '${(basePrice * 0.85).toStringAsFixed(0)}',
+                        child: TextField(
+                          controller: _priceController,
+                          textAlign: TextAlign.center,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          onChanged: (_) {
+                            setState(() {
+                              validationError = '';
+                            });
+                          },
+                          style: const TextStyle(
+                            fontSize: 30,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.black87,
+                          ),
+                          decoration: const InputDecoration(
+                            isCollapsed: true,
+                            border: InputBorder.none,
+                          ),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    const Text(
+                      'السعر المقترح من الشركة: ',
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: DarbakColors.subText,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xffF3F4F6),
-                      borderRadius: BorderRadius.circular(12),
+                    SarPrice(
+                      amount: suggestedPrice,
+                      decimalDigits: 0,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        color: DarbakColors.subText,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      iconSize: 15,
                     ),
-                    child: Row(
+                  ],
+                ),
+                if (lowestBid != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Checkbox(
-                          value: agree,
-                          activeColor: AppColors.primary,
-                          onChanged: (v) {
-                            setState(() => agree = v ?? false);
-                          },
-                        ),
-                        const Expanded(
-                          child: Text(
-                            'أقر بأن هذا العرض نهائي وملزم، وأوافق على شروط وأحكام المنصة',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              height: 1.5,
-                            ),
+                        const Text(
+                          'أقل عرض مقدم حتى الآن: ',
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: DarbakColors.danger,
+                            fontWeight: FontWeight.w600,
                           ),
+                        ),
+                        SarPrice(
+                          amount: lowestBid,
+                          decimalDigits: 0,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            color: DarbakColors.danger,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          iconSize: 15,
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 18),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: ElevatedButton.icon(
-                      onPressed: isSubmitting ? null : _submitBid,
-                      icon: isSubmitting
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                    Colors.white),
-                              ),
-                            )
-                          : const Icon(Icons.check_circle_outline_rounded),
-                      label: Text(
-                        isSubmitting ? 'جاري الإرسال...' : 'تأكيد وإرسال العرض',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _priceSuggestionButton(
+                        (suggestedPrice * 0.90).toStringAsFixed(0),
+                        'أقل 10%',
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _priceSuggestionButton(
+                        suggestedPrice.toStringAsFixed(0),
+                        'المقترح',
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: _priceSuggestionButton(
+                        (suggestedPrice * 1.10).toStringAsFixed(0),
+                        'أعلى 10%',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (typedBid != null && typedBid > 0)
+                  _BidComparisonCard(
+                    label: _comparisonLabel(typedBid, suggestedPrice),
+                    isHigher: typedBid > suggestedPrice,
+                    isMatching: (typedBid - suggestedPrice).abs() < 0.01,
+                  ),
+                if (validationError.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Text(
+                      validationError,
+                      style: const TextStyle(
+                        color: DarbakColors.danger,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xffF3F4F6),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    children: [
+                      Checkbox(
+                        value: agree,
+                        activeColor: DarbakColors.primary,
+                        onChanged: (v) {
+                          setState(() => agree = v ?? false);
+                        },
+                      ),
+                      const Expanded(
+                        child: Text(
+                          'أقر بأن هذا العرض نهائي وملزم، وأوافق على شروط وأحكام المنصة',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            height: 1.5,
+                          ),
                         ),
                       ),
-                      style: ElevatedButton.styleFrom(
-                        elevation: 0,
-                        backgroundColor: AppColors.success,
-                        disabledBackgroundColor: const Color(0xffCFE7C9),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: ElevatedButton.icon(
+                    onPressed: isSubmitting ? null : _submitBid,
+                    icon: isSubmitting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            ),
+                          )
+                        : const Icon(Icons.check_circle_outline_rounded),
+                    label: Text(
+                      isSubmitting ? 'جاري الإرسال...' : 'تأكيد وإرسال العرض',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      elevation: 0,
+                      backgroundColor: DarbakColors.success,
+                      disabledBackgroundColor: const Color(0xffCFE7C9),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _priceSuggestionButton(String value) {
+  Widget _priceSuggestionButton(String value, String label) {
     return OutlinedButton(
       onPressed: () => setState(() => _priceController.text = value),
       style: OutlinedButton.styleFrom(
         backgroundColor: Colors.white,
-        foregroundColor: AppColors.text,
-        side: const BorderSide(color: AppColors.border),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        foregroundColor: DarbakColors.text,
+        side: const BorderSide(color: DarbakColors.borderSoft),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         padding: const EdgeInsets.symmetric(vertical: 14),
       ),
-      child: Text(
-        '$value ر.س',
-        style: const TextStyle(
-          fontSize: 18,
-          fontWeight: FontWeight.w700,
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          SarPrice(
+            amount: value,
+            decimalDigits: 0,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            iconSize: 14,
+          ),
+        ],
       ),
     );
   }
 
   Widget _sectionCard({required Widget child}) {
+    return DarbakSurface(padding: const EdgeInsets.all(16), child: child);
+  }
+}
+
+class _BidComparisonCard extends StatelessWidget {
+  final String label;
+  final bool isHigher;
+  final bool isMatching;
+
+  const _BidComparisonCard({
+    required this.label,
+    required this.isHigher,
+    required this.isMatching,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isMatching
+        ? DarbakColors.primary
+        : isHigher
+        ? DarbakColors.orange
+        : DarbakColors.success;
+
     return Container(
-      padding: const EdgeInsets.all(16),
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppColors.border),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(.03),
-            blurRadius: 18,
-            offset: const Offset(0, 10),
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            isMatching
+                ? Icons.check_circle_outline_rounded
+                : isHigher
+                ? Icons.trending_up_rounded
+                : Icons.trending_down_rounded,
+            color: color,
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w800,
+                height: 1.4,
+              ),
+            ),
           ),
         ],
       ),
-      child: child,
+    );
+  }
+}
+
+class _LocationPin extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+
+  const _LocationPin({required this.icon, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 38,
+      height: 38,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Icon(icon, color: color, size: 21),
+    );
+  }
+}
+
+class _RouteCityBlock extends StatelessWidget {
+  final String label;
+  final String city;
+  final bool alignEnd;
+
+  const _RouteCityBlock({
+    required this.label,
+    required this.city,
+    this.alignEnd = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: alignEnd
+          ? CrossAxisAlignment.end
+          : CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: DarbakColors.subText,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          city,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: DarbakColors.text,
+            fontSize: 18,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -644,23 +869,20 @@ class _BidMetaItem extends StatelessWidget {
   final IconData icon;
   final String text;
 
-  const _BidMetaItem({
-    required this.icon,
-    required this.text,
-  });
+  const _BidMetaItem({required this.icon, required this.text});
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 18, color: AppColors.subText),
+        Icon(icon, size: 18, color: DarbakColors.subText),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             text,
             style: const TextStyle(
               fontSize: 14,
-              color: AppColors.text,
+              color: DarbakColors.text,
               fontWeight: FontWeight.w600,
             ),
             maxLines: 2,
@@ -671,4 +893,3 @@ class _BidMetaItem extends StatelessWidget {
     );
   }
 }
-

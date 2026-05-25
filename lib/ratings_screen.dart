@@ -3,6 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app_theme.dart';
 import 'app_widgets.dart';
 import 'api_service.dart';
+import 'models/review_target_profile.dart';
+import 'widgets/review_target_profile_card.dart';
 
 /// شاشة تقييم التسليم والاستقبال (Bilateral Ratings)
 class RatingsScreen extends StatefulWidget {
@@ -25,32 +27,116 @@ class RatingsScreen extends StatefulWidget {
 
 class _RatingsScreenState extends State<RatingsScreen> {
   Map<String, dynamic>? _userRatings;
+  ReviewTargetProfile? _reviewTarget;
   int? _selectedRating;
+  int? _currentUserId;
   final TextEditingController _commentsController = TextEditingController();
-  bool _isLoading = false;
+  bool _ratingsLoading = true;
+  bool _profileLoading = true;
   bool _isSubmitting = false;
 
   @override
   void initState() {
     super.initState();
-    _loadUserRatings();
+    _loadInitialData();
   }
 
-  Future<void> _loadUserRatings() async {
-    setState(() => _isLoading = true);
+  Map<String, dynamic> get _emptyRatings => {
+    'average_rating': '0.00',
+    'total_ratings': 0,
+    'ratings': <Map<String, dynamic>>[],
+  };
+
+  List<Map<String, dynamic>> get _ratingsList {
+    final raw = _userRatings?['ratings'];
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((rating) => Map<String, dynamic>.from(rating))
+        .toList();
+  }
+
+  double get _averageRating => _readDouble(_userRatings?['average_rating']);
+
+  int get _totalRatings => _readInt(_userRatings?['total_ratings']);
+
+  bool get _hasRatedThisShipment {
+    final currentUserId = _currentUserId;
+    if (currentUserId == null) return false;
+    return _ratingsList.any((rating) {
+      final shipmentId = _readInt(rating['shipment_id']);
+      final raterId = _readInt(rating['rater_id']);
+      return shipmentId == widget.shipmentId && raterId == currentUserId;
+    });
+  }
+
+  Future<void> _loadInitialData() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _currentUserId = prefs.getInt('user_id');
+    });
+    await _loadUserRatings(showLoader: false);
+  }
+
+  ReviewTargetProfile? _profileFromRatingsPayload(Map<String, dynamic> ratings) {
+    final raw = ratings['rated_profile'];
+    if (raw is! Map) return null;
+    try {
+      return ReviewTargetProfile.fromJson(Map<String, dynamic>.from(raw));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _loadUserRatings({bool showLoader = true}) async {
+    if (mounted && showLoader) setState(() => _ratingsLoading = true);
     try {
       final ratings = await ApiService.getUserRatings(widget.otherUserId);
+      ReviewTargetProfile? profile = _profileFromRatingsPayload(ratings);
+      if (profile == null) {
+        try {
+          profile = await ApiService.getUserProfileForReview(widget.otherUserId);
+        } catch (_) {
+          profile = null;
+        }
+      }
+      if (!mounted) return;
       setState(() {
         _userRatings = ratings;
-        _isLoading = false;
+        _reviewTarget = profile;
+        _profileLoading = false;
+        _ratingsLoading = false;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (!mounted) return;
+      setState(() {
+        _userRatings = _userRatings ?? _emptyRatings;
+        _reviewTarget = null;
+        _profileLoading = false;
+        _ratingsLoading = false;
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('خطأ: $e')));
     }
   }
+
+  static int _readInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  static double _readDouble(dynamic value) {
+    final parsed = value is num
+        ? value.toDouble()
+        : double.tryParse(value?.toString() ?? '');
+    if (parsed == null || !parsed.isFinite) return 0;
+    return parsed.clamp(0, 5).toDouble();
+  }
+
+  static String _readText(dynamic value) => value?.toString().trim() ?? '';
 
   Future<void> _submitRating() async {
     if (_selectedRating == null) {
@@ -60,13 +146,16 @@ class _RatingsScreenState extends State<RatingsScreen> {
       return;
     }
 
-    final prefs = await SharedPreferences.getInstance();
-    final userId = prefs.getInt('user_id');
-    final userRole = prefs.getString('user_role');
-
-    if (userId == null || userRole == null) {
+    if (_currentUserId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('لم يتم العثور على بيانات المستخدم')),
+      );
+      return;
+    }
+
+    if (_hasRatedThisShipment) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم تقييم هذه الرحلة مسبقاً')),
       );
       return;
     }
@@ -80,16 +169,25 @@ class _RatingsScreenState extends State<RatingsScreen> {
         'comment': _commentsController.text.trim(),
       });
 
+      if (!mounted) return;
+      await _loadUserRatings(showLoader: false);
+      if (!mounted) return;
+      setState(() {
+        _selectedRating = null;
+        _commentsController.clear();
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('تم إرسال التقييم بنجاح')));
-      Navigator.of(context).pop();
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('خطأ: $e')));
     } finally {
-      setState(() => _isSubmitting = false);
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
@@ -104,116 +202,64 @@ class _RatingsScreenState extends State<RatingsScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('التقييم والتقييمات'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_forward_ios),
-          onPressed: () => Navigator.pop(context),
-        ),
+        leading: const BackButton(),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: Directionality(
-                textDirection: TextDirection.rtl,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // User Info Card
-                    _buildUserCard(),
-                    const SizedBox(height: 24),
-
-                    // Rating Stats
-                    if (_userRatings != null) ...[
-                      _buildRatingStats(),
-                      const SizedBox(height: 24),
-                    ],
-
-                    // Rating Form (Add your own rating)
-                    _buildRatingForm(),
-
-                    const SizedBox(height: 24),
-
-                    // Past Ratings
-                    if (_userRatings != null &&
-                        (_userRatings?['ratings'] as List?)?.isNotEmpty == true)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          const Divider(),
-                          const SizedBox(height: 16),
-                          const Text(
-                            'التقييمات السابقة',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: DarbakColors.dark,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          ..._buildRatingsList(),
-                        ],
-                      ),
-                  ],
-                ),
-              ),
-            ),
-    );
-  }
-
-  Widget _buildUserCard() {
-    return Card(
-      elevation: 0,
-      color: DarbakColors.cardBackground,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            CircleAvatar(
-              radius: 30,
-              backgroundColor: DarbakColors.primaryGreen,
-              child: Icon(
-                widget.otherUserRole == 'driver'
-                    ? Icons.person_pin_circle
-                    : Icons.business,
-                color: Colors.white,
-                size: 32,
+        child: Directionality(
+          textDirection: TextDirection.rtl,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ReviewTargetProfileCard(
+                isLoading: _profileLoading,
+                profile: _reviewTarget,
+                fallbackName: widget.otherUserName,
+                fallbackRoleLabel:
+                    widget.otherUserRole == 'driver' ? 'سائق' : 'شركة',
               ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.otherUserName,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: DarbakColors.dark,
-                    ),
-                  ),
-                  Text(
-                    widget.otherUserRole == 'driver' ? 'سائق' : 'شاحن',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: DarbakColors.textSecondary,
-                    ),
-                  ),
+              const SizedBox(height: 24),
+              if (_ratingsLoading)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 40),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else ...[
+                if (_userRatings != null) ...[
+                  _buildRatingStats(),
+                  const SizedBox(height: 24),
                 ],
-              ),
-            ),
-          ],
+                _buildRatingForm(),
+                const SizedBox(height: 24),
+                if (_ratingsList.isNotEmpty)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Divider(),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'التقييمات السابقة',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: DarbakColors.dark,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ..._buildRatingsList(),
+                    ],
+                  ),
+              ],
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildRatingStats() {
-    final avgRating =
-        double.tryParse(_userRatings?['average_rating']?.toString() ?? '0') ??
-        0.0;
-    final totalRatings = _userRatings?['total_ratings'] ?? 0;
+    final avgRating = _averageRating;
+    final totalRatings = _totalRatings;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -265,6 +311,22 @@ class _RatingsScreenState extends State<RatingsScreen> {
   }
 
   Widget _buildRatingForm() {
+    if (_hasRatedThisShipment) {
+      return Card(
+        elevation: 0,
+        color: DarbakColors.cardBackground,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: const Padding(
+          padding: EdgeInsets.all(16),
+          child: Text(
+            'تم إرسال تقييمك لهذه الرحلة. شكراً لمساهمتك.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: DarbakColors.textSecondary),
+          ),
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -310,7 +372,7 @@ class _RatingsScreenState extends State<RatingsScreen> {
             hintText: 'شارك رأيك عن التسليم والخدمة...',
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
           ),
-          textAlign: TextAlign.right,
+          textAlign: TextAlign.start,
         ),
         const SizedBox(height: 20),
         _isSubmitting
@@ -325,8 +387,10 @@ class _RatingsScreenState extends State<RatingsScreen> {
   }
 
   List<Widget> _buildRatingsList() {
-    final ratings = (_userRatings?['ratings'] as List?) ?? [];
+    final ratings = _ratingsList;
     return ratings.map<Widget>((rating) {
+      final comment = _readText(rating['comment'] ?? rating['comments']);
+      final createdAt = _readText(rating['created_at']);
       return Card(
         elevation: 0,
         color: Colors.grey[50],
@@ -341,10 +405,7 @@ class _RatingsScreenState extends State<RatingsScreen> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   _buildStarRating(
-                    int.tryParse(
-                          '${rating['stars'] ?? rating['rating_stars'] ?? 0}',
-                        ) ??
-                        0,
+                    _readInt(rating['stars'] ?? rating['rating_stars']),
                   ),
                   const Text(
                     'تقييم',
@@ -355,12 +416,10 @@ class _RatingsScreenState extends State<RatingsScreen> {
                   ),
                 ],
               ),
-              if (((rating['comment'] ?? rating['comments']) as String?)
-                      ?.isNotEmpty ==
-                  true) ...[
+              if (comment.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(
-                  (rating['comment'] ?? rating['comments']).toString(),
+                  comment,
                   style: const TextStyle(
                     fontSize: 12,
                     color: DarbakColors.dark,
@@ -369,7 +428,7 @@ class _RatingsScreenState extends State<RatingsScreen> {
               ],
               const SizedBox(height: 6),
               Text(
-                rating['created_at']?.toString() ?? '',
+                createdAt,
                 style: const TextStyle(
                   fontSize: 10,
                   color: DarbakColors.textSecondary,
@@ -425,12 +484,21 @@ class _UserRatingsOverviewScreenState extends State<UserRatingsOverviewScreen> {
   Future<void> _loadRatings() async {
     try {
       final ratings = await ApiService.getUserRatings(widget.userId);
+      if (!mounted) return;
       setState(() {
         _ratings = ratings;
         _isLoading = false;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (!mounted) return;
+      setState(() {
+        _ratings = {
+          'average_rating': '0.00',
+          'total_ratings': 0,
+          'ratings': <Map<String, dynamic>>[],
+        };
+        _isLoading = false;
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('خطأ: $e')));
@@ -446,18 +514,21 @@ class _UserRatingsOverviewScreenState extends State<UserRatingsOverviewScreen> {
       );
     }
 
-    final avgRating =
-        double.tryParse(_ratings?['average_rating']?.toString() ?? '0') ?? 0.0;
-    final totalRatings = _ratings?['total_ratings'] ?? 0;
-    final ratingsList = (_ratings?['ratings'] as List?) ?? [];
+    final avgRating = _RatingsScreenState._readDouble(
+      _ratings?['average_rating'],
+    );
+    final totalRatings = _RatingsScreenState._readInt(
+      _ratings?['total_ratings'],
+    );
+    final ratingsList = ((_ratings?['ratings'] as List?) ?? [])
+        .whereType<Map>()
+        .map((rating) => Map<String, dynamic>.from(rating))
+        .toList();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('التقييمات'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_forward_ios),
-          onPressed: () => Navigator.pop(context),
-        ),
+        leading: const BackButton(),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -547,6 +618,9 @@ class _UserRatingsOverviewScreenState extends State<UserRatingsOverviewScreen> {
                   itemCount: ratingsList.length,
                   itemBuilder: (context, index) {
                     final rating = ratingsList[index];
+                    final comment = _RatingsScreenState._readText(
+                      rating['comment'] ?? rating['comments'],
+                    );
                     return Card(
                       elevation: 0,
                       color: Colors.grey[50],
@@ -564,10 +638,11 @@ class _UserRatingsOverviewScreenState extends State<UserRatingsOverviewScreen> {
                               children: [
                                 Row(
                                   children: List.generate(5, (idx) {
-                                    final starCount = int.tryParse(
-                                          '${rating['stars'] ?? rating['rating_stars'] ?? 0}',
-                                        ) ??
-                                        0;
+                                    final starCount =
+                                        _RatingsScreenState._readInt(
+                                          rating['stars'] ??
+                                              rating['rating_stars'],
+                                        );
                                     return Icon(
                                       Icons.star,
                                       size: 16,
@@ -586,14 +661,10 @@ class _UserRatingsOverviewScreenState extends State<UserRatingsOverviewScreen> {
                                 ),
                               ],
                             ),
-                            if (((rating['comment'] ?? rating['comments'])
-                                        as String?)
-                                    ?.isNotEmpty ==
-                                true) ...[
+                            if (comment.isNotEmpty) ...[
                               const SizedBox(height: 8),
                               Text(
-                                (rating['comment'] ?? rating['comments'])
-                                    .toString(),
+                                comment,
                                 style: const TextStyle(
                                   fontSize: 12,
                                   color: DarbakColors.dark,

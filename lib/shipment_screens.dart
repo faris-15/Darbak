@@ -2,16 +2,20 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'api_service.dart';
 import 'models/bid_model.dart';
+import 'widgets/sar_price.dart';
+import 'widgets/shipment_path.dart';
 
 /// شاشة سوق الشحنات للسائق
 class DriverShipmentsMarketScreen extends StatefulWidget {
   const DriverShipmentsMarketScreen({super.key});
 
   @override
-  State<DriverShipmentsMarketScreen> createState() => _DriverShipmentsMarketScreenState();
+  State<DriverShipmentsMarketScreen> createState() =>
+      _DriverShipmentsMarketScreenState();
 }
 
-class _DriverShipmentsMarketScreenState extends State<DriverShipmentsMarketScreen> {
+class _DriverShipmentsMarketScreenState
+    extends State<DriverShipmentsMarketScreen> {
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _shipments = [];
@@ -54,24 +58,30 @@ class _DriverShipmentsMarketScreenState extends State<DriverShipmentsMarketScree
               TextFormField(
                 controller: amountController,
                 keyboardType: TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'المبلغ (ريال)'),
-                validator: (value) => (value == null || value.isEmpty) ? 'أدخل مبلغ' : null,
+                decoration: const InputDecoration(labelText: 'المبلغ'),
+                validator: (value) =>
+                    (value == null || value.isEmpty) ? 'أدخل مبلغ' : null,
               ),
               TextFormField(
                 controller: etaController,
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(labelText: 'الايام المقدرة'),
-                validator: (value) => (value == null || value.isEmpty) ? 'أدخل عدد الأيام' : null,
+                validator: (value) =>
+                    (value == null || value.isEmpty) ? 'أدخل عدد الأيام' : null,
               ),
             ],
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('إلغاء')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('إلغاء'),
+          ),
           ElevatedButton(
             onPressed: () async {
               if (_formKey.currentState?.validate() ?? false) {
-                final amount = double.tryParse(amountController.text.trim()) ?? 0;
+                final amount =
+                    double.tryParse(amountController.text.trim()) ?? 0;
                 final days = int.tryParse(etaController.text.trim()) ?? 0;
                 await ApiService.placeBid({
                   'shipmentId': shipment['id'],
@@ -79,7 +89,9 @@ class _DriverShipmentsMarketScreenState extends State<DriverShipmentsMarketScree
                   'bidAmount': amount,
                   'estimatedDays': days,
                 });
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم إرسال العرض بنجاح')));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('تم إرسال العرض بنجاح')),
+                );
                 Navigator.pop(context, true);
               }
             },
@@ -104,9 +116,7 @@ class _DriverShipmentsMarketScreenState extends State<DriverShipmentsMarketScree
     }
 
     if (_shipments.isEmpty) {
-      return const Center(
-        child: Text('لا توجد شحنات متاحة حالياً'),
-      );
+      return const Center(child: Text('لا توجد شحنات متاحة حالياً'));
     }
 
     return ListView.builder(
@@ -122,12 +132,27 @@ class _DriverShipmentsMarketScreenState extends State<DriverShipmentsMarketScree
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text('شحنة #${shipment['id']}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                Text('من: ${shipment['pickup_address'] ?? '-'}'),
-                Text('إلى: ${shipment['dropoff_address'] ?? '-'}'),
+                Text(
+                  'شحنة #${shipment['id']}',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                ShipmentPath(
+                  pickupCity: shipment['pickup_address']?.toString(),
+                  dropoffCity: shipment['dropoff_address']?.toString(),
+                ),
+                const SizedBox(height: 8),
                 Text('الوزن (كجم): ${shipment['weight_kg']}'),
-                Text('السعر الأساسي: ${shipment['base_price']}'),
+                Row(
+                  children: [
+                    const Text('السعر الأساسي: '),
+                    SarPrice(
+                      amount: shipment['base_price'],
+                      style: const TextStyle(fontSize: 14),
+                      iconSize: 14,
+                    ),
+                  ],
+                ),
                 Text('حالة الطلب: ${shipment['status']}'),
                 const SizedBox(height: 8),
                 ElevatedButton(
@@ -200,14 +225,21 @@ class _ShipperBidsListScreenState extends State<ShipperBidsListScreen> {
                   ),
                 ),
                 const SizedBox(width: 12),
-                ElevatedButton(onPressed: _loadBids, child: const Text('جلب العروض')),
+                ElevatedButton(
+                  onPressed: _loadBids,
+                  child: const Text('جلب العروض'),
+                ),
               ],
             ),
             const SizedBox(height: 12),
             if (_loading) const CircularProgressIndicator(),
-            if (_error != null) Text('خطأ: $_error', style: const TextStyle(color: Colors.red)),
+            if (_error != null)
+              Text('خطأ: $_error', style: const TextStyle(color: Colors.red)),
             if (!_loading && _bids.isEmpty)
-              const Text('لا يوجد عروض حتى الآن', style: TextStyle(color: DarbakColors.textSecondary)),
+              const Text(
+                'لا يوجد عروض حتى الآن',
+                style: TextStyle(color: DarbakColors.textSecondary),
+              ),
             if (!_loading && _bids.isNotEmpty)
               Expanded(
                 child: ListView.builder(
@@ -218,9 +250,24 @@ class _ShipperBidsListScreenState extends State<ShipperBidsListScreen> {
                     return Card(
                       color: isBest ? Colors.green.shade50 : null,
                       child: ListTile(
-                        title: Text('عرض ${bid.bidAmount.toStringAsFixed(2)} ريال'),
-                        subtitle: Text('السائق: ${bid.driverId} - ETA: ${bid.estimatedDays} يوم\nالحالة: ${bid.bidStatus}'),
-                        trailing: isBest ? const Text('الأفضل', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)) : null,
+                        title: Row(
+                          children: [
+                            const Text('عرض '),
+                            SarPrice(amount: bid.bidAmount),
+                          ],
+                        ),
+                        subtitle: Text(
+                          'السائق: ${bid.driverId} - ETA: ${bid.estimatedDays} يوم\nالحالة: ${bid.bidStatus}',
+                        ),
+                        trailing: isBest
+                            ? const Text(
+                                'الأفضل',
+                                style: TextStyle(
+                                  color: Colors.green,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              )
+                            : null,
                       ),
                     );
                   },
@@ -232,4 +279,3 @@ class _ShipperBidsListScreenState extends State<ShipperBidsListScreen> {
     );
   }
 }
-

@@ -1,8 +1,25 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const { postMessage, getConversation } = require('../controllers/conversationController');
+const {
+  postMessage,
+  getConversation,
+  getOrCreateConversation,
+} = require('../controllers/conversationController');
 
 const router = express.Router();
+
+router.post(
+  '/get-or-create',
+  [
+    body('sender_id').isInt({ min: 1 }),
+    body('receiver_id').isInt({ min: 1 }),
+  ],
+  (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    return getOrCreateConversation(req, res);
+  }
+);
 
 router.post(
   '/',

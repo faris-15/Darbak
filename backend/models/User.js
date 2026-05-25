@@ -1,10 +1,11 @@
 const pool = require('../config/db');
+const { ensureProfileImageSchema } = require('../utils/profileImageSchema');
 
 const User = {
   create: async ({ fullName, email, phone, password, role = 'driver', licenseNo = null, commercialNo = null, documentPath = null, issueDate = null, expiryDate = null }) => {
     const [result] = await pool.execute(
-      'INSERT INTO users (full_name, email, phone, password, role, license_no, commercial_no, document_path, issue_date, expiry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [fullName, email, phone, password, role, licenseNo, commercialNo, documentPath, issueDate, expiryDate]
+      'INSERT INTO users (full_name, email, phone, password, role, license_no, commercial_no, document_path, issue_date, expiry_date, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [fullName, email, phone, password, role, licenseNo, commercialNo, documentPath, issueDate, expiryDate, 1]
     );
     return {
       id: result.insertId,
@@ -12,6 +13,7 @@ const User = {
       email,
       phone,
       role,
+      is_active: 1,
       verification_status: 'pending',
       license_no: licenseNo,
       commercial_no: commercialNo,
@@ -22,7 +24,14 @@ const User = {
   },
 
   findByPhoneOrEmail: async (identifier) => {
+    await ensureProfileImageSchema();
     const [rows] = await pool.execute('SELECT * FROM users WHERE phone = ? OR email = ?', [identifier, identifier]);
+    return rows[0];
+  },
+
+  findByEmail: async (email) => {
+    await ensureProfileImageSchema();
+    const [rows] = await pool.execute('SELECT * FROM users WHERE LOWER(email) = LOWER(?) LIMIT 1', [email]);
     return rows[0];
   },
 
@@ -43,8 +52,49 @@ const User = {
   },
 
   findById: async (id) => {
+    await ensureProfileImageSchema();
     const [rows] = await pool.execute('SELECT * FROM users WHERE id = ?', [id]);
     return rows[0];
+  },
+
+  /** `{ [userId]: full_name }` for driver shipment cards (batch). */
+  getFullNamesByIds: async (ids) => {
+    const unique = [
+      ...new Set(
+        (ids || [])
+          .map((x) => Number(x))
+          .filter((n) => Number.isFinite(n) && n > 0),
+      ),
+    ];
+    if (!unique.length) return {};
+    const placeholders = unique.map(() => '?').join(',');
+    const [rows] = await pool.execute(
+      `SELECT id, full_name FROM users WHERE id IN (${placeholders})`,
+      unique,
+    );
+    const out = {};
+    for (const r of rows) {
+      out[Number(r.id)] = r.full_name;
+    }
+    return out;
+  },
+
+  updateProfileFields: async (id, { fullName, email, phone, licenseNo, commercialNo }) => {
+    await ensureProfileImageSchema();
+    const [result] = await pool.execute(
+      'UPDATE users SET full_name = ?, email = ?, phone = ?, license_no = ?, commercial_no = ? WHERE id = ?',
+      [fullName, email, phone, licenseNo, commercialNo, id]
+    );
+    return result.affectedRows > 0;
+  },
+
+  updateProfileImage: async (id, profileImageUrl) => {
+    await ensureProfileImageSchema();
+    const [result] = await pool.execute(
+      'UPDATE users SET profile_image_url = ? WHERE id = ?',
+      [profileImageUrl, id]
+    );
+    return result.affectedRows > 0;
   },
 
   getPendingVerifications: async () => {

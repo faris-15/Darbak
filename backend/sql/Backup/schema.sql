@@ -13,12 +13,15 @@ CREATE TABLE IF NOT EXISTS users (
     license_no VARCHAR(50) NULL,
     commercial_no VARCHAR(50) NULL,
     document_path VARCHAR(255) NULL,
+    profile_image_url VARCHAR(1000) NULL,
     issue_date DATE NULL,
     expiry_date DATE NULL,
     verification_status ENUM('pending', 'verified', 'rejected') DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- جداول إعادة تعيين كلمة المرور المخصصة أُزيلت؛ استخدم Firebase Auth في التطبيق.
 
 CREATE TABLE IF NOT EXISTS shipments (
     id INT(11) NOT NULL AUTO_INCREMENT,
@@ -30,15 +33,23 @@ CREATE TABLE IF NOT EXISTS shipments (
     dropoff_address VARCHAR(255) NOT NULL,
     base_price DECIMAL(10,2) NOT NULL,
     final_price DECIMAL(10,2) NULL,
+    penalty_amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+    late_penalty_push_sent TINYINT(1) NOT NULL DEFAULT 0,
     period VARCHAR(20) NULL,
     special_instructions TEXT NULL,
     auction_duration_hours INT(11) NOT NULL DEFAULT 24,
     auction_end_time DATETIME NULL,
     status ENUM('pending', 'bidding', 'assigned', 'at_pickup', 'en_route', 'at_dropoff', 'delivered', 'cancelled') DEFAULT 'pending',
     expected_delivery_date DATETIME NOT NULL,
+    final_delivery_date DATETIME NULL,
     actual_delivery_date DATETIME NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
+    KEY idx_shipments_status_created (status, created_at),
+    KEY idx_shipments_status_price_created (status, base_price, created_at),
+    KEY idx_shipments_status_weight_created (status, weight_kg, created_at),
+    KEY idx_shipments_driver_status_created (driver_id, status, created_at),
+    KEY idx_shipments_shipper_created (shipper_id, created_at),
     FOREIGN KEY (shipper_id) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -97,18 +108,60 @@ CREATE TABLE IF NOT EXISTS messages (
     shipment_id INT(11) NOT NULL,
     sender_id INT(11) NOT NULL,
     receiver_id INT(11) NOT NULL,
+    message_type ENUM('text', 'image', 'video', 'location') NOT NULL DEFAULT 'text',
     message TEXT NOT NULL,
+    media_key VARCHAR(1000) NULL,
+    media_mime_type VARCHAR(120) NULL,
+    media_size_bytes BIGINT NULL,
+    media_file_name VARCHAR(255) NULL,
+    thumbnail_key VARCHAR(1000) NULL,
+    location_lat DECIMAL(10,7) NULL,
+    location_lng DECIMAL(10,7) NULL,
+    location_label VARCHAR(255) NULL,
+    delivered_at DATETIME NULL,
+    read_at DATETIME NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_messages_shipment_created (shipment_id, created_at),
+    KEY idx_messages_type_created (message_type, created_at),
+    KEY idx_messages_receiver_delivered (receiver_id, delivered_at),
+    KEY idx_messages_receiver_read (receiver_id, read_at),
+    KEY idx_messages_shipment_receiver_read (shipment_id, receiver_id, read_at),
     FOREIGN KEY (shipment_id) REFERENCES shipments(id) ON DELETE CASCADE,
     FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (receiver_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS conversations (
+    id INT(11) NOT NULL AUTO_INCREMENT,
+    shipment_id INT(11) NULL,
+    sender_id INT(11) NULL,
+    receiver_id INT(11) NULL,
+    message TEXT NULL,
+    conversation_key VARCHAR(64) NULL,
+    type ENUM('direct', 'group') NOT NULL DEFAULT 'direct',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_conversations_shipment_created (shipment_id, created_at),
+    UNIQUE KEY uq_conversations_direct_key (conversation_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS conversation_participants (
+    conversation_id INT(11) NOT NULL,
+    user_id INT(11) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (conversation_id, user_id),
+    KEY idx_conversation_participants_user (user_id, conversation_id),
+    CONSTRAINT conversation_participants_conversation_fk
+        FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+    CONSTRAINT conversation_participants_user_fk
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS compliance_documents (
   document_id int(11) NOT NULL AUTO_INCREMENT,
   user_id int(11) NOT NULL,
+  truck_id int(11) DEFAULT NULL,
   document_type enum('driver_license','vehicle_insurance','commercial_registration','tax_certificate','safety_certificate') COLLATE utf8mb4_unicode_ci NOT NULL,
   document_url varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   issue_date date DEFAULT NULL,
@@ -123,11 +176,14 @@ CREATE TABLE IF NOT EXISTS compliance_documents (
   PRIMARY KEY (document_id),
   KEY verified_by (verified_by),
   KEY idx_user_id (user_id),
+  KEY idx_truck_id (truck_id),
+  KEY idx_truck_document_type (truck_id,document_type),
   KEY idx_document_type (document_type),
   KEY idx_expiry_date (expiry_date),
   KEY idx_is_verified (is_verified),
   KEY idx_compliance_status (user_id,expiry_date,is_verified),
   CONSTRAINT compliance_documents_ibfk_1 FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT compliance_documents_truck_fk FOREIGN KEY (truck_id) REFERENCES trucks (id) ON DELETE CASCADE,
   CONSTRAINT compliance_documents_ibfk_2 FOREIGN KEY (verified_by) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

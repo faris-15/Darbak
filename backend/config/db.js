@@ -1,11 +1,13 @@
 const mysql = require('mysql2/promise');
-require('dotenv').config();
+const path = require('path');
+
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const pool = mysql.createPool({
-  host: process.env.MYSQL_HOST || 'localhost',
+  host: process.env.DB_HOST || process.env.MYSQL_HOST || 'localhost',
   user: process.env.MYSQL_USER || 'root',
   password: process.env.MYSQL_PASSWORD || '',
-  database: process.env.MYSQL_DATABASE || 'darbak',
+  database: process.env.MYSQL_DATABASE || 'darbak_db',
   port: process.env.MYSQL_PORT || 3306,
   waitForConnections: true,
   connectionLimit: 10,

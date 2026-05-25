@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# مفتاح حساب خدمة Firebase (لا ترفعه إلى Git)
+backend/firebase-service-account.json
+backend/*firebase-adminsdk*.json
+
+# كاش أداة Firebase CLI محلياً
+.firebase

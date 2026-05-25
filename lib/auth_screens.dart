@@ -1,12 +1,28 @@
+// شاشات التسجيل وتسجيل الدخول ونسيت كلمة المرور.
+// إعادة التعيين عبر Firebase فقط؛ عند 401 من الخادم مع بريد إلكتروني يُجرّب تسجيل دخول Firebase ثم POST /auth/login-firebase.
+
+import 'package:flutter/foundation.dart' show debugPrint, kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:lottie/lottie.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'app_theme.dart';
 import 'app_widgets.dart';
+import 'truck_classification/truck_classification_models.dart';
+import 'truck_classification/widgets/truck_configuration_form.dart';
 import 'driver_home.dart';
 import 'shipper_home.dart';
 import 'api_service.dart';
+import 'services/profile_repository.dart';
+
+/// مقاسات موحّدة لواجهات المصادقة (تسجيل الدخول، اختيار الدور، التسجيل).
+abstract final class DarbakAuthLayout {
+  DarbakAuthLayout._();
+
+  /// عرض زر «متابعة» كنسبة من عرض المحتوى (هوامش يمنى ويسرى مثل التصميم).
+  static const double primaryButtonWidthFactor = 0.82;
+}
 
 /// شاشة السبلاتش (الشعار)
 class SplashScreen extends StatefulWidget {
@@ -18,14 +34,11 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
+  late final AnimationController _controller = AnimationController(vsync: this);
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this);
-    
-    // المستمع لحالة الأنيميشن: ينتقل للشاشة التالية فور اكتماله
     _controller.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         if (mounted) {
@@ -72,28 +85,21 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     double screenWidth = MediaQuery.of(context).size.width;
-    double animationSize = screenWidth * 0.7;
+    double animationSize = screenWidth * 1;
 
     return Scaffold(
       backgroundColor: Colors.white,
       body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Lottie.asset(
-              'assets/animations/animation.json',
-              controller: _controller,
-              onLoaded: (composition) {
-                // ضبط مدة المتحكم لتكون نفس مدة ملف الأنيميشن بالضبط
-                _controller
-                  ..duration = composition.duration
-                  ..forward();
-              },
-              width: animationSize,
-              height: animationSize,
-              fit: BoxFit.contain,
-            ),
-          ],
+        child: Lottie.asset(
+          'assets/animations/animation.json',
+          controller: _controller,
+          onLoaded: (composition) {
+            _controller
+              ..duration = composition.duration
+              ..forward();
+          },
+          width: animationSize,
+          fit: BoxFit.contain,
         ),
       ),
     );
@@ -157,7 +163,7 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
               const Spacer(),
               DarbakPrimaryButton(
                 label: 'متابعة',
-                icon: Icons.arrow_back_ios_new_rounded,
+                widthFactor: DarbakAuthLayout.primaryButtonWidthFactor,
                 onPressed: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(
@@ -171,9 +177,7 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
                 child: TextButton(
                   onPressed: () {
                     Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const LoginScreen(),
-                      ),
+                      MaterialPageRoute(builder: (_) => const LoginScreen()),
                     );
                   },
                   child: const Text(
@@ -313,45 +317,111 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> _login() async {
-    setState(() => _loading = true);
-    try {
-      final data = await ApiService.login(
-        _phoneEmailController.text.trim(),
-        _passwordController.text.trim(),
+  Future<void> _completeLogin(Map<String, dynamic> data) async {
+    final user = data['user'];
+    final token = data['token']?.toString() ?? '';
+    if (token.isEmpty) {
+      throw DarbakException('لم يتم استلام رمز الدخول من الخادم');
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    await prefs.setBool('is_logged_in', true);
+    await prefs.setInt('user_id', user['id']);
+    await prefs.setString('user_role', user['role']);
+    await prefs.setString('user_email', user['email'] ?? '');
+    await prefs.setString('user_name', user['full_name'] ?? '');
+    await prefs.setString('auth_token', token);
+    await ProfileRepository.cacheProfile(Map<String, dynamic>.from(user));
+
+    if (!mounted) return;
+    if (user['role'] == 'driver') {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const DriverHomeScreen()),
       );
-      final user = data['user'];
-      final token = data['token']?.toString() ?? '';
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('is_logged_in', true);
-      await prefs.setInt('user_id', user['id']);
-      await prefs.setString('user_role', user['role']);
-      await prefs.setString('user_email', user['email'] ?? '');
-      await prefs.setString('user_name', user['full_name'] ?? '');
-      if (token.isNotEmpty) {
-        await prefs.setString('auth_token', token);
-      }
-
-      if (user['role'] == 'driver') {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const DriverHomeScreen()),
-        );
-      } else if (user['role'] == 'shipper') {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const ShipperHomeScreen()),
-        );
-      } else {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('دور المستخدم غير معروف')));
-      }
-    } catch (e) {
+    } else if (user['role'] == 'shipper') {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const ShipperHomeScreen()),
+      );
+    } else if (user['role'] == 'admin') {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const ShipperHomeScreen()),
+      );
+    } else {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text(e.toString())));
+      ).showSnackBar(const SnackBar(content: Text('دور المستخدم غير معروف')));
+    }
+  }
+
+  String _firebaseLoginMessage(Object e) {
+    if (e is DarbakException) {
+      return _stripThirdPartyFromAuthMessage(e.message);
+    }
+    if (e is FirebaseAuthException) {
+      switch (e.code) {
+        case 'user-not-found':
+        case 'wrong-password':
+        case 'invalid-credential':
+          return 'بيانات الدخول غير صحيحة';
+        case 'invalid-email':
+          return 'البريد الإلكتروني غير صالح';
+        case 'user-disabled':
+          return 'هذا الحساب معطّل';
+        case 'too-many-requests':
+          return 'محاولات كثيرة. حاول لاحقاً';
+        case 'network-request-failed':
+          return 'تعذّر الاتصال. تحقّق من الشبكة';
+        default:
+          return 'تعذّر تسجيل الدخول. حاول مرة أخرى';
+      }
+    }
+    return _stripThirdPartyFromAuthMessage(e.toString());
+  }
+
+  Future<void> _login() async {
+    setState(() => _loading = true);
+    final identifier = _phoneEmailController.text.trim();
+    final password = _passwordController.text.trim();
+    try {
+      final data = await ApiService.login(identifier, password);
+      await _completeLogin(data);
+    } catch (e) {
+      final isEmail = identifier.contains('@');
+      if (e is DarbakException &&
+          isEmail &&
+          e.httpStatus == 401) {
+        try {
+          final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+            email: identifier,
+            password: password,
+          );
+          final idToken = await cred.user?.getIdToken();
+          if (idToken == null || idToken.isEmpty) {
+            throw DarbakException('تعذّر إكمال تسجيل الدخول');
+          }
+          final data = await ApiService.loginWithFirebaseIdToken(
+            idToken,
+            password: password,
+          );
+          await _completeLogin(data);
+        } catch (fe) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(_firebaseLoginMessage(fe))),
+          );
+        }
+      } else {
+        if (!mounted) return;
+        final msg = e is DarbakException
+            ? _stripThirdPartyFromAuthMessage(e.message)
+            : _stripThirdPartyFromAuthMessage(e.toString());
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
+      }
     } finally {
-      setState(() => _loading = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -372,7 +442,11 @@ class _LoginScreenState extends State<LoginScreen> {
               Center(
                 child: Column(
                   children: [
-                    Image.asset('lib/assets/assets-logo.jpeg', height: 180),
+                    Image.asset(
+                      'lib/assets/assets-logo.jpeg',
+                      width: MediaQuery.of(context).size.width * 0.43,
+                      fit: BoxFit.contain,
+                    ),
                     const SizedBox(height: 12),
                     const Text(
                       'تسجيل الدخول',
@@ -425,14 +499,18 @@ class _LoginScreenState extends State<LoginScreen> {
                       },
                     ),
                   ),
-                  textAlign: TextAlign.right,
+                  textAlign: TextAlign.start,
                 ),
               ),
               const SizedBox(height: 8),
               Center(
                 child: TextButton(
                   onPressed: () {
-                    // لاحقًا: شاشة نسيت كلمة المرور
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const ForgotPasswordScreen(),
+                      ),
+                    );
                   },
                   child: const Text.rich(
                     TextSpan(
@@ -462,7 +540,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ? const Center(child: CircularProgressIndicator())
                   : DarbakPrimaryButton(
                       label: 'متابعة',
-                      icon: Icons.arrow_back_ios_new_rounded,
+                      widthFactor: DarbakAuthLayout.primaryButtonWidthFactor,
                       onPressed: _login,
                     ),
               const SizedBox(height: 16),
@@ -530,9 +608,10 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   final _commercialNoController = TextEditingController();
   final _issueDateController = TextEditingController();
   final _expiryDateController = TextEditingController();
-  final _truckTypeController = TextEditingController();
   final _plateNumberController = TextEditingController();
   final _isthimaraNoController = TextEditingController();
+  final _truckConfigFormKey = GlobalKey<TruckConfigurationFormState>();
+  TruckConfiguration? _truckConfiguration;
 
   String? _documentPath;
   String? _documentFileName;
@@ -543,11 +622,11 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     _fullNameController.dispose();
     _phoneController.dispose();
     _passwordController.dispose();
+    _emailController.dispose();
     _licenseNoController.dispose();
     _commercialNoController.dispose();
     _issueDateController.dispose();
     _expiryDateController.dispose();
-    _truckTypeController.dispose();
     _plateNumberController.dispose();
     _isthimaraNoController.dispose();
     super.dispose();
@@ -581,6 +660,33 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     }
   }
 
+  /// بعد نجاح التسجيل في MySQL ينشئ نفس البريف في Firebase حتى تعمل `sendPasswordResetEmail`.
+  Future<void> _linkFirebaseAfterMysqlRegister(String email, String password) async {
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        return;
+      } on FirebaseAuthException catch (fe) {
+        if (fe.code == 'email-already-in-use') return;
+        final looksLikeNetwork = fe.code == 'network-request-failed' ||
+            (fe.message?.toLowerCase().contains('network') ?? false);
+        if (attempt == 0 && looksLikeNetwork) {
+          await Future<void>.delayed(const Duration(seconds: 2));
+          continue;
+        }
+        if (!mounted) return;
+        final msg = looksLikeNetwork
+            ? 'تعذّر الاتصال بالإنترنت. تأكد من الشبكة ثم أعد المحاولة.'
+            : 'تم إنشاء الحساب. إن واجهت مشكلة في تسجيل الدخول لاحقاً، جرّب «نسيت كلمة المرور» أو تواصل مع الدعم.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        return;
+      }
+    }
+  }
+
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) {
       setState(() => _currentStep = 0);
@@ -588,14 +694,19 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
     }
 
     if (widget.role == 'driver') {
-      if (_licenseNoController.text.isEmpty || 
-          _issueDateController.text.isEmpty || 
+      final truckConfigValid =
+          _truckConfigFormKey.currentState?.validateAll() ?? false;
+      if (_licenseNoController.text.isEmpty ||
+          _issueDateController.text.isEmpty ||
           _expiryDateController.text.isEmpty ||
-          _truckTypeController.text.isEmpty ||
+          !truckConfigValid ||
+          _truckConfiguration == null ||
           _plateNumberController.text.isEmpty ||
           _isthimaraNoController.text.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('يرجى إكمال جميع بيانات السائق والشاحنة')),
+          const SnackBar(
+            content: Text('يرجى إكمال جميع بيانات السائق والشاحنة'),
+          ),
         );
         setState(() => _currentStep = 1);
         return;
@@ -639,9 +750,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         'expiryDate': widget.role == 'driver'
             ? _expiryDateController.text.trim()
             : null,
-        'truckType': widget.role == 'driver'
-            ? _truckTypeController.text.trim()
-            : null,
+        if (widget.role == 'driver' && _truckConfiguration != null)
+          ..._truckConfiguration!.toApiPayload(),
         'plateNumber': widget.role == 'driver'
             ? _plateNumberController.text.trim()
             : null,
@@ -651,9 +761,13 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
       };
 
       await ApiService.register(data);
+      await _linkFirebaseAfterMysqlRegister(
+        _emailController.text.trim().toLowerCase(),
+        _passwordController.text.trim(),
+      );
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('تم التسجيل بنجاح! انتظر التحقق من الأدمن'),
+          content: Text('تم التسجيل بنجاح! انتظر التحقق من الأدارة'),
         ),
       );
       Navigator.of(context).pop();
@@ -684,6 +798,39 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             setState(() => _currentStep--);
           }
         },
+        controlsBuilder: (context, details) {
+          final isLast = _currentStep >= 2;
+          return Padding(
+            padding: const EdgeInsets.only(top: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_loading && isLast)
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
+                else
+                  DarbakPrimaryButton(
+                    label: isLast ? 'إنشاء الحساب' : 'متابعة',
+                    widthFactor: DarbakAuthLayout.primaryButtonWidthFactor,
+                    onPressed: _loading ? null : details.onStepContinue,
+                  ),
+                if (_currentStep > 0) ...[
+                  const SizedBox(height: 8),
+                  Center(
+                    child: TextButton(
+                      onPressed: details.onStepCancel,
+                      child: const Text('السابق'),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        },
         steps: [
           Step(
             title: const Text('البيانات الأساسية'),
@@ -691,6 +838,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
               key: _formKey,
               child: Column(
                 children: [
+                  const SizedBox(height: 2.3),
                   TextFormField(
                     controller: _fullNameController,
                     decoration: const InputDecoration(
@@ -698,6 +846,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                     ),
                     validator: (v) => v!.isEmpty ? 'مطلوب' : null,
                   ),
+                  const SizedBox(height: 13),
                   TextFormField(
                     controller: _emailController,
                     decoration: const InputDecoration(
@@ -706,11 +855,13 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                     keyboardType: TextInputType.emailAddress,
                     validator: (v) => v!.isEmpty ? 'مطلوب' : null,
                   ),
+                  const SizedBox(height: 13),
                   TextFormField(
                     controller: _phoneController,
                     decoration: const InputDecoration(labelText: 'رقم الجوال'),
                     validator: (v) => v!.isEmpty ? 'مطلوب' : null,
                   ),
+                  const SizedBox(height: 13),
                   TextFormField(
                     controller: _passwordController,
                     decoration: const InputDecoration(labelText: 'كلمة المرور'),
@@ -733,6 +884,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                       labelText: 'رقم رخصة القيادة',
                     ),
                   ),
+                  const SizedBox(height: 8),
                   TextFormField(
                     controller: _issueDateController,
                     decoration: const InputDecoration(
@@ -747,10 +899,13 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                         lastDate: DateTime(2100),
                       );
                       if (picked != null) {
-                        _issueDateController.text = picked.toIso8601String().split('T')[0];
+                        _issueDateController.text = picked
+                            .toIso8601String()
+                            .split('T')[0];
                       }
                     },
                   ),
+                  const SizedBox(height: 8),
                   TextFormField(
                     controller: _expiryDateController,
                     decoration: const InputDecoration(
@@ -765,39 +920,48 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                         lastDate: DateTime(2100),
                       );
                       if (picked != null) {
-                        _expiryDateController.text = picked.toIso8601String().split('T')[0];
+                        _expiryDateController.text = picked
+                            .toIso8601String()
+                            .split('T')[0];
                       }
                     },
                   ),
-                  TextFormField(
-                    controller: _truckTypeController,
-                    decoration: const InputDecoration(
-                      labelText: 'نوع الشاحنة',
+                  const SizedBox(height: 8),
+                  Directionality(
+                    textDirection: TextDirection.rtl,
+                    child: TruckConfigurationForm(
+                      key: _truckConfigFormKey,
+                      onChanged: (config) {
+                        setState(() => _truckConfiguration = config);
+                      },
                     ),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'مطلوب' : null,
                   ),
+                  const SizedBox(height: 8),
                   TextFormField(
                     controller: _plateNumberController,
-                    decoration: const InputDecoration(
-                      labelText: 'رقم اللوحة',
-                    ),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'مطلوب' : null,
+                    decoration: const InputDecoration(labelText: 'رقم اللوحة'),
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'مطلوب' : null,
                   ),
+                  const SizedBox(height:8),
                   TextFormField(
                     controller: _isthimaraNoController,
                     decoration: const InputDecoration(
-                      labelText: 'رقم الاستمارة',
+                      labelText: 'رخصة سير المركبة',
                     ),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'مطلوب' : null,
+                    validator: (v) =>
+                        (v == null || v.trim().isEmpty) ? 'مطلوب' : null,
                   ),
                 ],
-                if (widget.role == 'shipper')
+                if (widget.role == 'shipper') ...[
+                  const SizedBox(height: 0),
                   TextFormField(
                     controller: _commercialNoController,
                     decoration: const InputDecoration(
                       labelText: 'رقم السجل التجاري',
                     ),
                   ),
+                ],
               ],
             ),
           ),
@@ -805,18 +969,27 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             title: const Text('رفع الوثائق'),
             content: Column(
               children: [
-                Text('يرجى رفع ${widget.role == 'driver' ? 'رخصة القيادة' : 'السجل التجاري'} (PDF/Image)'),
+                Text(
+                  'يرجى رفع ${widget.role == 'driver' ? 'رخصة القيادة' : 'السجل التجاري'} (PDF/Image)',
+                ),
                 const SizedBox(height: 16),
                 ElevatedButton.icon(
                   onPressed: _pickDocument,
                   icon: const Icon(Icons.upload_file),
-                  label: Text(widget.role == 'driver' ? 'رفع رخصة القيادة' : 'رفع السجل التجاري'),
+                  label: Text(
+                    widget.role == 'driver'
+                        ? 'رفع رخصة القيادة'
+                        : 'رفع السجل التجاري',
+                  ),
                 ),
                 if (_documentPath != null) ...[
                   const SizedBox(height: 10),
                   Row(
                     children: [
-                      const Icon(Icons.check_circle, color: DarbakColors.successGreen),
+                      const Icon(
+                        Icons.check_circle,
+                        color: DarbakColors.successGreen,
+                      ),
                       const SizedBox(width: 8),
                       Flexible(
                         child: Chip(
@@ -830,17 +1003,176 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                     ],
                   ),
                 ],
-                const SizedBox(height: 16),
-                _loading
-                    ? const CircularProgressIndicator()
-                    : ElevatedButton(
-                        onPressed: _register,
-                        child: const Text('إنشاء الحساب'),
-                      ),
               ],
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// إخفاء أسماء مقدمي خدمة المصادقة من رسائل تُعرض في الواجهة.
+String _stripThirdPartyFromAuthMessage(String m) {
+  final lower = m.toLowerCase();
+  if (lower.contains('firebase') ||
+      lower.contains('google') ||
+      lower.contains('identitytoolkit') ||
+      m.contains('فايربيس')) {
+    return 'تعذّر إكمال العملية. حاول مرة أخرى.';
+  }
+  return m;
+}
+
+/// رسائل شاشة «نسيت كلمة المرور» — بدون تفاصيل تقنية للمستخدم.
+String _userFacingForgotPasswordMessage(Object error) {
+  const noAccount =
+      'لا يوجد حساب بهذا البريد الإلكتروني أو أنّه غير صحيح.';
+  if (error is DarbakException) {
+    final m = error.message;
+    final code = error.httpStatus;
+    if (code == 429) return m;
+    if (code == 400) return m;
+    if (m.contains('لا يوجد حساب')) return m;
+    if (code == 502 || code == 503) return m;
+    if (code == 500) {
+      return 'تعذّر إرسال الرابط حالياً. حاول لاحقاً.';
+    }
+    if (m.contains('تعذّر الاتصال بالخادم') ||
+        m.contains('تعذر الاتصال بالخادم')) {
+      return m;
+    }
+    return noAccount;
+  }
+  final s = error.toString();
+  if (s.contains('SocketException') ||
+      s.contains('Connection refused') ||
+      s.contains('Failed host lookup')) {
+    return 'تعذّر الاتصال بالخادم';
+  }
+  return noAccount;
+}
+
+/// إن ردّ الخادم يعني «المسار غير موجود» أو تعذّر sendOobCode نجرّب إرسال Firebase من التطبيق مباشرةً.
+bool _forgotPasswordUseFirebaseClientFallback(DarbakException e) {
+  final code = e.httpStatus;
+  final m = e.message;
+  if (code == 404 && m.contains('لا يوجد حساب')) return false;
+  if (code == 404) return true;
+  if (code == 502 || code == 503) return true;
+  if (m == 'تعذّر إكمال الطلب.') return true;
+  return false;
+}
+
+/// شاشة «نسيت كلمة المرور»: الطلب يمر عبر الخادم (التحقق من Firebase ثم sendOobCode) لتسجيل الرد وتجنب نجاح وهمي.
+class ForgotPasswordScreen extends StatefulWidget {
+  const ForgotPasswordScreen({super.key});
+
+  @override
+  State<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
+}
+
+class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _emailController = TextEditingController();
+  bool _loading = false;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _loading = true);
+    final email = _emailController.text.trim().toLowerCase();
+    try {
+      await ApiService.requestFirebasePasswordReset(email);
+      if (kDebugMode) {
+        debugPrint('[ForgotPassword] طلب إعادة التعيين عبر الخادم نجح: $email');
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('سيصلك بريد لإعادة تعيين كلمة المرور.'),
+        ),
+      );
+      Navigator.of(context).pop();
+    } on DarbakException catch (e) {
+      if (_forgotPasswordUseFirebaseClientFallback(e)) {
+        try {
+          await FirebaseAuth.instance.setLanguageCode('ar');
+          await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+          if (kDebugMode) {
+            debugPrint('[ForgotPassword] تم الإرسال عبر Firebase من التطبيق (احتياطي)');
+          }
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('سيصلك بريد لإعادة تعيين كلمة المرور.'),
+            ),
+          );
+          Navigator.of(context).pop();
+        } catch (fe) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(_userFacingForgotPasswordMessage(fe))),
+          );
+        }
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_userFacingForgotPasswordMessage(e))),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_userFacingForgotPasswordMessage(e))),
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('نسيت كلمة المرور')),
+      body: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('أدخل بريدك المسجل.'),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'البريد الإلكتروني',
+                  border: OutlineInputBorder(),
+                ),
+                validator: (v) {
+                  final t = v?.trim() ?? '';
+                  if (t.isEmpty) return 'يرجى إدخال البريد';
+                  if (!t.contains('@')) return 'بريد غير صالح';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 24),
+              _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : ElevatedButton(
+                      onPressed: _submit,
+                      child: const Text('إرسال رابط إعادة التعيين'),
+                    ),
+            ],
+          ),
+        ),
       ),
     );
   }

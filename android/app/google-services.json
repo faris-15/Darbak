@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "176722015466",
+    "project_id": "darbak-7ecc0",
+    "storage_bucket": "darbak-7ecc0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:176722015466:android:34e78176dc4b9020bad393",
+        "android_client_info": {
+          "package_name": "com.example.darbak"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAIsSdWozob3lUF_a0yWMwkZW-30aAlnhY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

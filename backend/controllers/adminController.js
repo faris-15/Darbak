@@ -1,364 +1,50 @@
-const fs = require('fs');
-const path = require('path');
-const { GetObjectCommand } = require('@aws-sdk/client-s3');
+const bcrypt = require('bcryptjs');
 const pool = require('../config/db');
+const { GetObjectCommand } = require('@aws-sdk/client-s3');
+const { s3, generatePresignedUrl, resolveS3ObjectKey } = require('../utils/s3Config');
 const User = require('../models/User');
-const {
-    generatePresignedUrl,
-    parseStorageKey,
-    guessContentTypeFromKey,
-    s3,
-} = require('../utils/s3Config');
+const { emitAdminDashboard } = require('../utils/adminRealtime');
 
-/** لواجهة المعاينة: pdf | image | other */
-function inferPreviewKindFromRef(ref) {
-    const raw = String(ref || '');
-    const key = parseStorageKey(raw);
-    let mime = guessContentTypeFromKey(key);
-    if (mime === 'application/octet-stream') {
-        const m = raw.toLowerCase().match(/\.(pdf|jpe?g|png|gif|webp|bmp|svg)(?:\?|#|$)/);
-        if (m) mime = guessContentTypeFromKey(`x.${m[1] === 'jpeg' ? 'jpg' : m[1]}`);
-    }
-    if (mime === 'application/pdf') return 'pdf';
-    if (mime.startsWith('image/')) return 'image';
+function previewKindFromKey(key) {
+    const low = String(key || '').toLowerCase();
+    if (low.endsWith('.pdf')) return 'pdf';
+    if (/\.(jpe?g|png|gif|webp|bmp|svg)$/.test(low)) return 'image';
     return 'other';
 }
 
-/** نوع الملف من أول بايتات (ملفات بلا امتداد أو Content-Type خاطئ) */
-function sniffBufferPreview(buf) {
-    if (!buf || buf.length < 12) return null;
-    if (buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46) {
-        return { mime: 'application/pdf', kind: 'pdf' };
+async function streamS3KeyToResponse(res, key) {
+    if (!process.env.MINIO_BUCKET) {
+        res.status(500).json({ success: false, message: 'MINIO_BUCKET غير مضبوط' });
+        return;
     }
-    if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
-        return { mime: 'image/jpeg', kind: 'image' };
-    }
-    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
-        return { mime: 'image/png', kind: 'image' };
-    }
-    const head = buf.slice(0, 6).toString('ascii');
-    if (head.startsWith('GIF87') || head.startsWith('GIF89')) {
-        return { mime: 'image/gif', kind: 'image' };
-    }
-    if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46 && buf.length >= 12) {
-        if (buf.slice(8, 12).toString('ascii') === 'WEBP') return { mime: 'image/webp', kind: 'image' };
-    }
-    return null;
-}
-const { decryptText } = require('../utils/encryption');
+    const out = await s3.send(
+        new GetObjectCommand({
+            Bucket: process.env.MINIO_BUCKET,
+            Key: key,
+            ResponseContentDisposition: 'inline',
+        })
+    );
+    const ct = out.ContentType || 'application/octet-stream';
+    res.setHeader('Content-Type', ct);
+    res.setHeader('X-Preview-Kind', previewKindFromKey(key));
+    if (out.ContentLength != null) res.setHeader('Content-Length', String(out.ContentLength));
 
-let cachedUsersCols = null;
-let cachedDisputesTable = null;
-
-/** MinIO / S3 GetObject Body — SDK v3 may omit .pipe(); always buffer for small admin docs (≤10MB). */
-async function bufferFromS3GetObjectBody(body) {
-    if (!body) return null;
-    if (typeof body.transformToByteArray === 'function') {
-        const u8 = await body.transformToByteArray();
-        return Buffer.from(u8);
-    }
-    if (typeof body.pipe === 'function') {
-        return await new Promise((resolve, reject) => {
-            const chunks = [];
-            body.on('data', (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
-            body.on('end', () => resolve(Buffer.concat(chunks)));
-            body.on('error', reject);
+    const body = out.Body;
+    if (body && typeof body.pipe === 'function') {
+        body.on('error', (err) => {
+            console.error('[AdminController] preview stream:', err);
+            if (!res.headersSent) res.status(500).end();
+            else res.destroy(err);
         });
+        body.pipe(res);
+        return;
     }
-    const chunks = [];
-    for await (const chunk of body) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    if (body && typeof body.transformToByteArray === 'function') {
+        const ab = await body.transformToByteArray();
+        res.send(Buffer.from(ab));
+        return;
     }
-    return Buffer.concat(chunks);
-}
-
-async function getUsersColumnSet() {
-    if (cachedUsersCols) return cachedUsersCols;
-    try {
-        const [rows] = await pool.execute(
-            `SELECT COLUMN_NAME AS c FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'`
-        );
-        cachedUsersCols = new Set(rows.map((r) => r.c));
-    } catch {
-        cachedUsersCols = new Set();
-    }
-    return cachedUsersCols;
-}
-
-async function disputesTableReady() {
-    if (cachedDisputesTable !== null) return cachedDisputesTable;
-    try {
-        const [rows] = await pool.execute(
-            `SELECT 1 AS ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'disputes' LIMIT 1`
-        );
-        cachedDisputesTable = rows.length > 0;
-    } catch {
-        cachedDisputesTable = false;
-    }
-    return cachedDisputesTable;
-}
-
-async function notificationReadsReady() {
-    try {
-        const [rows] = await pool.execute(
-            `SELECT 1 AS ok FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'admin_notification_reads' LIMIT 1`
-        );
-        return rows.length > 0;
-    } catch {
-        return false;
-    }
-}
-
-function pagination(req, maxLimit = 100) {
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const limit = Math.min(maxLimit, Math.max(1, parseInt(req.query.limit, 10) || 20));
-    const offset = (page - 1) * limit;
-    return { page, limit, offset };
-}
-
-/** Unified activity rows for feed + notifications */
-async function fetchUnifiedActivities(limit, offset) {
-    /** UNION requires identical collation on string columns across branches (mixed utf8mb4_general_ci / unicode_ci + ENUM). */
-    const U = 'utf8mb4_unicode_ci';
-    const cs = (expr) =>
-        `CAST(${expr} AS CHAR(3072) CHARACTER SET utf8mb4) COLLATE ${U}`;
-
-    const disputesUnion = (await disputesTableReady())
-        ? `
-    UNION ALL
-    (
-      SELECT
-        ${cs("'dispute_opened'")} AS type,
-        ${cs("CONCAT('', d.id)")} AS ref_id,
-        ${cs('du.full_name')} AS actor,
-        ${cs(
-            "CONCAT('تظلم مالي قيمته ', CAST(d.amount AS CHAR CHARACTER SET utf8mb4), ' ريال — شحنة #', CAST(d.shipment_id AS CHAR CHARACTER SET utf8mb4))"
-        )} AS detail,
-        d.created_at AS activity_date,
-        ${cs("CONCAT('dispute_', d.id)")} AS notification_key
-      FROM disputes d
-      JOIN users du ON du.id = d.driver_id
-      WHERE d.status = 'open'
-    )
-    `
-        : '';
-
-    const sql = `
-    (
-      SELECT
-        ${cs("'registration'")} AS type,
-        ${cs("CONCAT('', u.id)")} AS ref_id,
-        ${cs('u.full_name')} AS actor,
-        ${cs("CONCAT('تسجيل ', IF(u.role = 'driver', 'سائق جديد', 'شركة نقل'))")} AS detail,
-        u.created_at AS activity_date,
-        ${cs("CONCAT('reg_', u.id)")} AS notification_key
-      FROM users u
-      WHERE u.role IN ('driver', 'shipper')
-    )
-    UNION ALL
-    (
-      SELECT
-        ${cs("'bid_submitted'")} AS type,
-        ${cs("CONCAT('', b.id)")} AS ref_id,
-        ${cs('dr.full_name')} AS actor,
-        ${cs(
-            "CONCAT('تقديم عرض سعر ', CAST(b.bid_amount AS CHAR CHARACTER SET utf8mb4), ' ريال للشحنة #', CAST(b.shipment_id AS CHAR CHARACTER SET utf8mb4))"
-        )} AS detail,
-        b.created_at AS activity_date,
-        ${cs("CONCAT('bid_', b.id)")} AS notification_key
-      FROM bids b
-      JOIN users dr ON dr.id = b.driver_id
-      WHERE b.bid_status = 'pending'
-    )
-    UNION ALL
-    (
-      SELECT
-        ${cs("IF(b.bid_status = 'accepted', 'bid_accepted', 'bid_rejected')")} AS type,
-        ${cs("CONCAT('', b.id)")} AS ref_id,
-        ${cs('dr.full_name')} AS actor,
-        ${cs(
-            `IF(
-          b.bid_status = 'accepted',
-          CONCAT('قبول عرض بقيمة ', CAST(b.bid_amount AS CHAR CHARACTER SET utf8mb4), ' ريال للشحنة #', CAST(b.shipment_id AS CHAR CHARACTER SET utf8mb4)),
-          CONCAT('رفض عرض للشحنة #', CAST(b.shipment_id AS CHAR CHARACTER SET utf8mb4))
-        )`
-        )} AS detail,
-        b.created_at AS activity_date,
-        ${cs(
-            "CONCAT('bidstat_', b.id, '_', CAST(b.bid_status AS CHAR CHARACTER SET utf8mb4))"
-        )} AS notification_key
-      FROM bids b
-      JOIN users dr ON dr.id = b.driver_id
-      WHERE b.bid_status IN ('accepted', 'rejected')
-    )
-    UNION ALL
-    (
-      SELECT
-        ${cs("'trip_completed'")} AS type,
-        ${cs("CONCAT('', s.id)")} AS ref_id,
-        ${cs("COALESCE(drv.full_name, 'السائق')")} AS actor,
-        ${cs("CONCAT('اكتملت الرحلة للشحنة #', CAST(s.id AS CHAR CHARACTER SET utf8mb4))")} AS detail,
-        COALESCE(s.actual_delivery_date, s.created_at) AS activity_date,
-        ${cs("CONCAT('trip_done_', s.id)")} AS notification_key
-      FROM shipments s
-      LEFT JOIN users drv ON drv.id = s.driver_id
-      WHERE s.status = 'delivered'
-    )
-    UNION ALL
-    (
-      SELECT
-        ${cs("'rating_submitted'")} AS type,
-        ${cs("CONCAT('', r.id)")} AS ref_id,
-        ${cs('ur.full_name')} AS actor,
-        ${cs("CONCAT('تقييم ', CAST(r.stars AS CHAR CHARACTER SET utf8mb4), ' نجوم')")} AS detail,
-        r.created_at AS activity_date,
-        ${cs("CONCAT('rating_', r.id)")} AS notification_key
-      FROM ratings r
-      JOIN users ur ON ur.id = r.rater_id
-    )
-    UNION ALL
-    (
-      SELECT
-        ${cs("'document'")} AS type,
-        ${cs("CONCAT('', cd.document_id)")} AS ref_id,
-        ${cs('u.full_name')} AS actor,
-        ${cs(
-            "CONCAT('رفع مستند: ', CAST(cd.document_type AS CHAR CHARACTER SET utf8mb4))"
-        )} AS detail,
-        cd.uploaded_at AS activity_date,
-        ${cs("CONCAT('doc_', cd.document_id)")} AS notification_key
-      FROM compliance_documents cd
-      JOIN users u ON cd.user_id = u.id
-    )
-    UNION ALL
-    (
-      SELECT
-        ${cs("'verification_decided'")} AS type,
-        ${cs("CONCAT('', cd.document_id)")} AS ref_id,
-        ${cs('u.full_name')} AS actor,
-        ${cs(`CASE
-          WHEN cd.is_verified = 1 THEN CONCAT('اعتماد مستند (', CAST(cd.document_type AS CHAR CHARACTER SET utf8mb4), ')')
-          WHEN cd.is_verified = 2 THEN CONCAT('رفض مستند (', CAST(cd.document_type AS CHAR CHARACTER SET utf8mb4), ')')
-          ELSE CONCAT('تحديث حالة مستند (', CAST(cd.document_type AS CHAR CHARACTER SET utf8mb4), ')')
-        END`)} AS detail,
-        cd.verified_at AS activity_date,
-        ${cs("CONCAT('ver_', cd.document_id, '_', UNIX_TIMESTAMP(cd.verified_at))")} AS notification_key
-      FROM compliance_documents cd
-      JOIN users u ON cd.user_id = u.id
-      WHERE cd.verified_at IS NOT NULL
-    )
-    ${disputesUnion}
-    ORDER BY activity_date DESC
-    LIMIT ? OFFSET ?
-  `;
-
-    const [rows] = await pool.execute(sql, [limit, offset]);
-    return rows;
-}
-
-/** بث ملف التوثيق (MinIO ثم القرص المحلي) — يُستدعى من ?url= أو من معرف المستند */
-async function sendDocumentPreviewForRaw(rawInput, res) {
-    try {
-        const raw = String(rawInput || '').trim();
-        if (!raw) {
-            return res.status(400).json({ success: false, message: 'الرابط مفقود' });
-        }
-
-        const key = parseStorageKey(raw);
-        if (!key) {
-            return res.status(400).json({ success: false, message: 'مسار الملف غير صالح' });
-        }
-
-        const contentType = guessContentTypeFromKey(key);
-        const safeSuffix = path.basename(key) || 'document';
-        const maxPreview = 15 * 1024 * 1024;
-
-        if (process.env.MINIO_BUCKET && process.env.MINIO_ENDPOINT) {
-            try {
-                const command = new GetObjectCommand({
-                    Bucket: process.env.MINIO_BUCKET,
-                    Key: key,
-                });
-                const out = await s3.send(command);
-                const buf = await bufferFromS3GetObjectBody(out.Body);
-                if (buf && buf.length > maxPreview) {
-                    return res.status(413).json({
-                        success: false,
-                        message: 'حجم الملف يتجاوز حد المعاينة (15 ميجابايت)',
-                    });
-                }
-                if (buf && buf.length) {
-                    const sniffed = sniffBufferPreview(buf);
-                    const guessed = guessContentTypeFromKey(key);
-                    let ctype;
-                    let previewKind;
-                    if (sniffed) {
-                        ctype = sniffed.mime;
-                        previewKind = sniffed.kind;
-                    } else {
-                        ctype =
-                            guessed !== 'application/octet-stream'
-                                ? guessed
-                                : out.ContentType || contentType;
-                        previewKind = inferPreviewKindFromRef(raw);
-                    }
-                    res.setHeader('Content-Type', ctype);
-                    res.setHeader('X-Preview-Kind', previewKind);
-                    res.setHeader(
-                        'Content-Disposition',
-                        `inline; filename*=UTF-8''${encodeURIComponent(safeSuffix)}`
-                    );
-                    res.setHeader('Content-Length', buf.length);
-                    return res.send(buf);
-                }
-            } catch (err) {
-                console.warn('[AdminController] MinIO preview failed:', err.message);
-            }
-        }
-
-        const uploadsRoot = path.resolve(path.join(__dirname, '..', 'uploads'));
-        const localPath = path.resolve(path.join(uploadsRoot, key));
-        if (!localPath.startsWith(uploadsRoot)) {
-            return res.status(400).json({ success: false, message: 'مسار غير مسموح' });
-        }
-        if (!fs.existsSync(localPath)) {
-            return res.status(404).json({
-                success: false,
-                message:
-                    'المستند غير موجود. تأكد من إعدادات MinIO (MINIO_ENDPOINT، MINIO_BUCKET) وأن الملف ما يزال في التخزين.',
-            });
-        }
-
-        const stat = fs.statSync(localPath);
-        if (stat.size > maxPreview) {
-            return res.status(413).json({
-                success: false,
-                message: 'حجم الملف يتجاوز حد المعاينة (15 ميجابايت)',
-            });
-        }
-        const buf = fs.readFileSync(localPath);
-        if (!buf.length) {
-            return res.status(404).json({ success: false, message: 'الملف فارغ' });
-        }
-        const sniffed = sniffBufferPreview(buf);
-        const guessed = guessContentTypeFromKey(key);
-        const ctype = sniffed
-            ? sniffed.mime
-            : guessed !== 'application/octet-stream'
-              ? guessed
-              : contentType;
-        const previewKind = sniffed ? sniffed.kind : inferPreviewKindFromRef(raw);
-        res.setHeader('Content-Type', ctype);
-        res.setHeader('X-Preview-Kind', previewKind);
-        res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(safeSuffix)}`);
-        res.setHeader('Content-Length', buf.length);
-        return res.send(buf);
-    } catch (error) {
-        console.error('[AdminController] sendDocumentPreviewForRaw:', error);
-        if (!res.headersSent) {
-            res.status(500).json({ success: false, message: 'فشل جلب الملف' });
-        }
-    }
+    res.status(500).json({ success: false, message: 'لا يمكن قراءة الملف من التخزين' });
 }
 
 const AdminController = {
@@ -366,86 +52,79 @@ const AdminController = {
         try {
             console.log('[AdminController] Fetching dashboard stats...');
 
-            const cols = await getUsersColumnSet();
-            const activeExpr = cols.has('is_active') ? 'COALESCE(is_active, 1) = 1' : '1=1';
+            // 1. جلب إحصائيات الأدوار (سائق/شاحن)
+            const [userStats] = await pool.execute('SELECT role, COUNT(*) as total FROM users GROUP BY role');
 
-            const [userStats] = await pool.execute(
-                `SELECT role, COUNT(*) AS total FROM users WHERE ${activeExpr} GROUP BY role`
-            );
+            // 2. جلب إحصائيات التوثيق المعلق
+            const [docStats] = await pool.execute('SELECT COUNT(*) as pending FROM compliance_documents WHERE is_verified = 0');
 
-            const [docStats] = await pool.execute(
-                'SELECT COUNT(*) AS pending FROM compliance_documents WHERE is_verified = 0'
-            );
+            // 2.5 جلب إحصائيات الشحنات حسب الحالة (لإظهار الرقم الصحيح في الكروت العلوية)
+            const [shipmentStats] = await pool.execute('SELECT status, COUNT(*) as total FROM shipments GROUP BY status');
 
-            const [shipmentStats] = await pool.execute(
-                'SELECT status, COUNT(*) AS total FROM shipments GROUP BY status'
-            );
-
+            // 3. جلب آخر الشحنات (زيادة العدد لـ 15 لملء الفراغ تماماً في الجدول)
             const [recentShipments] = await pool.execute(`
-                SELECT s.id, u.full_name AS shipper, s.pickup_address, s.dropoff_address, s.status,
-                       COALESCE(s.final_price, s.base_price) AS final_price
+                SELECT s.id, u.full_name as shipper, s.pickup_address, s.dropoff_address, s.status,
+                       COALESCE(s.final_price, s.base_price) as final_price
                 FROM shipments s
                 LEFT JOIN users u ON s.shipper_id = u.id
                 ORDER BY s.created_at DESC LIMIT 15
             `);
 
-            const activities = await fetchUnifiedActivities(15, 0);
+            // 4. جلب سجل النشاطات الشامل (تصحيح أنواع النشاطات لتتوافق مع أيقونات الواجهة)
+            const [activities] = await pool.execute(`
+                (SELECT
+                    'ship' as type,
+                    u.full_name as actor,
+                    CONCAT('إضافة شحنة من: ', SUBSTRING_INDEX(s.pickup_address, ',', 1)) as detail,
+                    s.created_at as activity_date
+                FROM shipments s
+                JOIN users u ON s.shipper_id = u.id)
 
-            const [[roleRow]] = await pool.execute(`
+                UNION ALL
+
+                (SELECT
+                    'bid' as type,
+                    u.full_name as actor,
+                    CONCAT('تقديم عرض سعر بقيمة: ', b.bid_amount, ' ر.س') as detail,
+                    b.created_at as activity_date
+                FROM bids b
+                JOIN users u ON b.driver_id = u.id)
+
+                UNION ALL
+
+                (SELECT
+                    'document' as type,
+                    u.full_name as actor,
+                    CONCAT('رفع مستند: ', cd.document_type) as detail,
+                    cd.uploaded_at as activity_date
+                FROM compliance_documents cd
+                JOIN users u ON cd.user_id = u.id)
+
+                ORDER BY activity_date DESC LIMIT 15
+            `);
+
+            const [[summary]] = await pool.execute(`
                 SELECT
-                  SUM(role = 'driver') AS drivers,
-                  SUM(role = 'shipper') AS companies,
-                  SUM(role IN ('driver','shipper')) AS platform_users
-                FROM users WHERE ${activeExpr}
+                    (SELECT COUNT(*) FROM users) AS totalUsers,
+                    (SELECT COUNT(*) FROM users WHERE role = 'driver') AS driversCount,
+                    (SELECT COUNT(*) FROM users WHERE role = 'shipper') AS companiesCount,
+                    (SELECT COUNT(*) FROM shipments WHERE status IN ('assigned','at_pickup','en_route','at_dropoff')) AS activeTrips,
+                    (SELECT COUNT(*) FROM shipments WHERE status = 'delivered') AS completedTrips,
+                    (SELECT COUNT(*) FROM bids WHERE bid_status = 'pending') AS pendingBidsCount,
+                    (SELECT COALESCE(SUM(COALESCE(final_price, base_price, 0)), 0) FROM shipments WHERE status = 'delivered') AS totalRevenue,
+                    (SELECT COUNT(*) FROM compliance_documents WHERE is_verified = 0) AS pendingVerifications
             `);
-
-            const [[tripRow]] = await pool.execute(`
-                SELECT
-                  SUM(status IN ('assigned','at_pickup','en_route','at_dropoff')) AS active_trips,
-                  SUM(status = 'delivered') AS completed_trips
-                FROM shipments
-            `);
-
-            const [[revRow]] = await pool.execute(`
-                SELECT COALESCE(SUM(COALESCE(final_price, base_price)), 0) AS total_revenue
-                FROM shipments WHERE status = 'delivered'
-            `);
-
-            let openDisputes = 0;
-            if (await disputesTableReady()) {
-                const [[d]] = await pool.execute(
-                    `SELECT COUNT(*) AS c FROM disputes WHERE status = 'open'`
-                );
-                openDisputes = d.c || 0;
-            }
-
-            const pendingBidsRow = await pool.execute(
-                `SELECT COUNT(*) AS c FROM bids WHERE bid_status = 'pending'`
-            );
-            const pendingBidsCount = pendingBidsRow[0][0].c || 0;
-
-            const summary = {
-                totalUsers: Number(roleRow.platform_users) || 0,
-                driversCount: Number(roleRow.drivers) || 0,
-                companiesCount: Number(roleRow.companies) || 0,
-                activeTrips: Number(tripRow.active_trips) || 0,
-                completedTrips: Number(tripRow.completed_trips) || 0,
-                pendingVerifications: docStats[0].pending || 0,
-                totalRevenue: Number(revRow.total_revenue) || 0,
-                openDisputes,
-                pendingBidsCount,
-            };
 
             res.json({
                 success: true,
                 data: {
+                    summary: summary || {},
                     userStats: userStats || [],
                     shipmentStats: shipmentStats || [],
                     pendingUsersCount: docStats[0].pending || 0,
                     recentShipments: recentShipments || [],
-                    activities: activities || [],
-                    summary,
-                },
+                    activities: activities || []
+                }
             });
         } catch (error) {
             console.error('[AdminController] Stats Error:', error);
@@ -453,366 +132,9 @@ const AdminController = {
         }
     },
 
-    /** Paginated unified activity */
-    getActivityFeed: async (req, res) => {
-        try {
-            const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 30));
-            const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
-            const rows = await fetchUnifiedActivities(limit, offset);
-            res.json({
-                success: true,
-                data: rows,
-                pagination: { limit, offset, hasMore: rows.length === limit },
-            });
-        } catch (error) {
-            console.error('[AdminController] Activity feed:', error);
-            res.status(500).json({ success: false, message: 'خطأ في جلب النشاط' });
-        }
-    },
-
-    getNotifications: async (req, res) => {
-        try {
-            const limit = Math.min(80, Math.max(1, parseInt(req.query.limit, 10) || 40));
-            const rows = await fetchUnifiedActivities(limit, 0);
-            const keys = rows.map((r) => r.notification_key).filter(Boolean);
-            let readSet = new Set();
-            if (keys.length && (await notificationReadsReady())) {
-                const ph = keys.map(() => '?').join(',');
-                const [reads] = await pool.execute(
-                    `SELECT notification_key FROM admin_notification_reads WHERE notification_key IN (${ph})`,
-                    keys
-                );
-                readSet = new Set(reads.map((x) => x.notification_key));
-            }
-            const items = rows.map((r) => ({
-                key: r.notification_key,
-                type: r.type,
-                title: r.actor,
-                body: r.detail,
-                created_at: r.activity_date,
-                read: readSet.has(r.notification_key),
-            }));
-            const unreadCount = items.filter((i) => !i.read).length;
-            res.json({ success: true, data: { items, unreadCount } });
-        } catch (error) {
-            console.error('[AdminController] Notifications:', error);
-            res.status(500).json({ success: false, message: 'خطأ في الإشعارات' });
-        }
-    },
-
-    markNotificationsRead: async (req, res) => {
-        try {
-            if (!(await notificationReadsReady())) {
-                return res.json({ success: true, message: 'لا يوجد جدول تخزين القراءة (شغّل migration)' });
-            }
-            const keys = req.body.keys;
-            const single = req.body.key;
-            const list = Array.isArray(keys) ? keys : single ? [single] : [];
-            if (!list.length) {
-                return res.status(400).json({ success: false, message: 'لا توجد مفاتيح' });
-            }
-            const trimmed = list.slice(0, 200).map((k) => String(k));
-            for (const key of trimmed) {
-                await pool.execute('INSERT IGNORE INTO admin_notification_reads (notification_key) VALUES (?)', [
-                    key,
-                ]);
-            }
-            res.json({ success: true });
-        } catch (error) {
-            console.error('[AdminController] markNotificationsRead:', error);
-            res.status(500).json({ success: false, message: 'فشل التحديث' });
-        }
-    },
-
-    browseUsers: async (req, res) => {
-        try {
-            const { q, role, verification, active, dateFrom, dateTo } = req.query;
-            const { page, limit, offset } = pagination(req, 100);
-            const cols = await getUsersColumnSet();
-
-            const params = [];
-            let where = 'WHERE 1=1';
-
-            if (role && ['driver', 'shipper', 'admin'].includes(role)) {
-                where += ' AND role = ?';
-                params.push(role);
-            }
-
-            if (verification && ['pending', 'verified', 'rejected'].includes(verification)) {
-                where += ' AND verification_status = ?';
-                params.push(verification);
-            }
-
-            if (cols.has('is_active') && active !== undefined && active !== '') {
-                where += ' AND COALESCE(is_active,1) = ?';
-                params.push(active === '1' || active === 'true' ? 1 : 0);
-            }
-
-            if (q && String(q).trim()) {
-                const like = `%${String(q).trim()}%`;
-                where += ' AND (full_name LIKE ? OR email LIKE ? OR phone LIKE ?)';
-                params.push(like, like, like);
-            }
-
-            if (dateFrom) {
-                where += ' AND created_at >= ?';
-                params.push(dateFrom);
-            }
-            if (dateTo) {
-                where += ' AND created_at < DATE_ADD(?, INTERVAL 1 DAY)';
-                params.push(dateTo);
-            }
-
-            const countSql = `SELECT COUNT(*) AS total FROM users ${where}`;
-            const [[countRow]] = await pool.execute(countSql, params);
-
-            const activeSel = cols.has('is_active') ? ', COALESCE(is_active,1) AS is_active' : '';
-            const dataSql = `
-              SELECT id, full_name, email, phone, role, verification_status, created_at ${activeSel}
-              FROM users ${where}
-              ORDER BY created_at DESC
-              LIMIT ? OFFSET ?
-            `;
-            const [rows] = await pool.execute(dataSql, [...params, limit, offset]);
-
-            res.json({
-                success: true,
-                data: rows,
-                pagination: {
-                    page,
-                    limit,
-                    total: countRow.total,
-                    totalPages: Math.ceil(countRow.total / limit) || 1,
-                },
-            });
-        } catch (error) {
-            console.error('[AdminController] browseUsers:', error);
-            res.status(500).json({ success: false, message: 'خطأ في جلب المستخدمين' });
-        }
-    },
-
-    getUserDetail: async (req, res) => {
-        try {
-            const id = req.params.id;
-            const cols = await getUsersColumnSet();
-            const activeSel = cols.has('is_active') ? ', COALESCE(is_active,1) AS is_active' : '';
-            const [users] = await pool.execute(
-                `SELECT id, full_name, email, phone, role, verification_status, created_at,
-                        license_no, commercial_no, document_path ${activeSel}
-                 FROM users WHERE id = ? LIMIT 1`,
-                [id]
-            );
-            if (!users.length) {
-                return res.status(404).json({ success: false, message: 'غير موجود' });
-            }
-            const user = users[0];
-            delete user.password;
-            try {
-                if (user.license_no) user.license_no = decryptText(user.license_no);
-            } catch (_) {
-                /* leave raw if not decryptable */
-            }
-            try {
-                if (user.commercial_no) user.commercial_no = decryptText(user.commercial_no);
-            } catch (_) {
-                /* leave raw */
-            }
-
-            let trucks = [];
-            if (user.role === 'driver') {
-                const [t] = await pool.execute(
-                    `SELECT id, plate_number, truck_type, verification_status, is_active, created_at FROM trucks WHERE user_id = ?`,
-                    [id]
-                );
-                trucks = t;
-            }
-
-            res.json({ success: true, data: { ...user, trucks } });
-        } catch (error) {
-            console.error('[AdminController] getUserDetail:', error);
-            res.status(500).json({ success: false, message: 'خطأ في التفاصيل' });
-        }
-    },
-
-    setUserActive: async (req, res) => {
-        try {
-            const id = req.params.id;
-            const { is_active } = req.body;
-            const cols = await getUsersColumnSet();
-            if (!cols.has('is_active')) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'عمود is_active غير متوفر — شغّل migrations_06_admin_dashboard.sql',
-                });
-            }
-            const activeVal = is_active === false || is_active === 0 || is_active === '0' ? 0 : 1;
-            const [u] = await pool.execute(`SELECT role FROM users WHERE id = ?`, [id]);
-            if (!u.length) return res.status(404).json({ success: false, message: 'غير موجود' });
-            if (u[0].role === 'admin') {
-                return res.status(400).json({ success: false, message: 'لا يمكن تعطيل حساب مدير' });
-            }
-            await User.updateActiveFlag(id, activeVal === 1);
-            res.json({ success: true, message: activeVal ? 'تم التفعيل' : 'تم التعطيل' });
-        } catch (error) {
-            console.error('[AdminController] setUserActive:', error);
-            res.status(500).json({ success: false, message: 'خطأ في التحديث' });
-        }
-    },
-
-    browseShipments: async (req, res) => {
-        try {
-            const { q, status, dateFrom, dateTo } = req.query;
-            const { page, limit, offset } = pagination(req, 100);
-            const params = [];
-            let where = 'WHERE 1=1';
-
-            if (status) {
-                where += ' AND s.status = ?';
-                params.push(status);
-            }
-            if (q && String(q).trim()) {
-                const like = `%${String(q).trim()}%`;
-                where += ` AND (CAST(s.id AS CHAR) LIKE ? OR s.pickup_address LIKE ? OR s.dropoff_address LIKE ?
-                     OR ship.full_name LIKE ? OR drv.full_name LIKE ?)`;
-                params.push(like, like, like, like, like);
-            }
-            if (dateFrom) {
-                where += ' AND s.created_at >= ?';
-                params.push(dateFrom);
-            }
-            if (dateTo) {
-                where += ' AND s.created_at < DATE_ADD(?, INTERVAL 1 DAY)';
-                params.push(dateTo);
-            }
-
-            const [[countRow]] = await pool.execute(
-                `SELECT COUNT(*) AS total FROM shipments s
-                 LEFT JOIN users ship ON ship.id = s.shipper_id
-                 LEFT JOIN users drv ON drv.id = s.driver_id
-                 ${where}`,
-                params
-            );
-
-            const [rows] = await pool.execute(
-                `SELECT s.*,
-                        ship.full_name AS shipper_name,
-                        drv.full_name AS driver_name,
-                        COALESCE(s.final_price, s.base_price) AS final_price
-                 FROM shipments s
-                 LEFT JOIN users ship ON ship.id = s.shipper_id
-                 LEFT JOIN users drv ON drv.id = s.driver_id
-                 ${where}
-                 ORDER BY s.created_at DESC
-                 LIMIT ? OFFSET ?`,
-                [...params, limit, offset]
-            );
-
-            res.json({
-                success: true,
-                data: rows,
-                pagination: {
-                    page,
-                    limit,
-                    total: countRow.total,
-                    totalPages: Math.ceil(countRow.total / limit) || 1,
-                },
-            });
-        } catch (error) {
-            console.error('[AdminController] browseShipments:', error);
-            res.status(500).json({ success: false, message: 'خطأ في جلب الشحنات' });
-        }
-    },
-
-    listDisputes: async (req, res) => {
-        try {
-            if (!(await disputesTableReady())) {
-                return res.json({
-                    success: true,
-                    data: [],
-                    pagination: { page: 1, limit: 20, total: 0, totalPages: 1 },
-                    message: 'جدول التظلمات غير مهيأ — شغّل migrations_06_admin_dashboard.sql',
-                });
-            }
-
-            const { status, q } = req.query;
-            const { page, limit, offset } = pagination(req, 100);
-            const params = [];
-            let where = 'WHERE 1=1';
-
-            if (status && ['open', 'approved', 'rejected'].includes(status)) {
-                where += ' AND d.status = ?';
-                params.push(status);
-            }
-            if (q && String(q).trim()) {
-                const like = `%${String(q).trim()}%`;
-                where += ' AND (drv.full_name LIKE ? OR CAST(d.shipment_id AS CHAR) LIKE ? OR d.dispute_reason LIKE ?)';
-                params.push(like, like, like);
-            }
-
-            const [[countRow]] = await pool.execute(
-                `SELECT COUNT(*) AS total FROM disputes d
-                 JOIN users drv ON drv.id = d.driver_id ${where}`,
-                params
-            );
-
-            const [rows] = await pool.execute(
-                `SELECT d.id, d.id AS transaction_id, d.shipment_id, d.driver_id, d.amount,
-                        d.dispute_reason, d.status, d.created_at, d.resolved_at,
-                        drv.full_name AS driver_name
-                 FROM disputes d
-                 JOIN users drv ON drv.id = d.driver_id
-                 ${where}
-                 ORDER BY d.created_at DESC
-                 LIMIT ? OFFSET ?`,
-                [...params, limit, offset]
-            );
-
-            res.json({
-                success: true,
-                data: rows,
-                pagination: {
-                    page,
-                    limit,
-                    total: countRow.total,
-                    totalPages: Math.ceil(countRow.total / limit) || 1,
-                },
-            });
-        } catch (error) {
-            console.error('[AdminController] listDisputes:', error);
-            res.status(500).json({ success: false, message: 'خطأ في التظلمات' });
-        }
-    },
-
-    resolveDispute: async (req, res) => {
-        try {
-            if (!(await disputesTableReady())) {
-                return res.status(400).json({ success: false, message: 'جدول التظلمات غير متوفر' });
-            }
-            const id = req.params.id || req.body.transactionId || req.body.disputeId;
-            const status = req.body.status;
-            if (!id) return res.status(400).json({ success: false, message: 'معرف التظلم مفقود' });
-            if (!['approved', 'rejected'].includes(status)) {
-                return res.status(400).json({ success: false, message: 'حالة غير صالحة' });
-            }
-            const newStatus = status === 'approved' ? 'approved' : 'rejected';
-            await pool.execute(
-                `UPDATE disputes SET status = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'open'`,
-                [newStatus, id]
-            );
-            res.json({ success: true, message: 'تم تحديث التظلم' });
-        } catch (error) {
-            console.error('[AdminController] resolveDispute:', error);
-            res.status(500).json({ success: false, message: 'فشل التحديث' });
-        }
-    },
-
     getUsers: async (req, res) => {
         try {
-            const cols = await getUsersColumnSet();
-            const activeSel = cols.has('is_active') ? ', COALESCE(is_active,1) AS is_active' : '';
-            const [rows] = await pool.execute(
-                `SELECT id, full_name, email, phone, role, verification_status, created_at ${activeSel} FROM users ORDER BY created_at DESC`
-            );
+            const [rows] = await pool.execute('SELECT id, full_name, email, phone, role, verification_status, created_at FROM users ORDER BY created_at DESC');
             res.json({ success: true, data: rows });
         } catch (error) {
             console.error('[AdminController] Error in getUsers:', error);
@@ -822,9 +144,10 @@ const AdminController = {
 
     getShipments: async (req, res) => {
         try {
+            // جلب الشحنات مع اسم الشاحن وتصحيح السعر الظاهر
             const [rows] = await pool.execute(`
-                SELECT s.*, u.full_name AS shipper_name,
-                       COALESCE(s.final_price, s.base_price) AS final_price
+                SELECT s.*, u.full_name as shipper_name,
+                       COALESCE(s.final_price, s.base_price) as final_price
                 FROM shipments s
                 LEFT JOIN users u ON s.shipper_id = u.id
                 ORDER BY s.created_at DESC LIMIT 50
@@ -836,52 +159,537 @@ const AdminController = {
         }
     },
 
-    getPendingUsers: async (req, res) => {
+    /** لوحة الإدارة — قائمة مستخدمين مع تصفية وتصفح (كان ينقص فيقول المتصفح «فشل الاتصال») */
+    browseUsers: async (req, res) => {
         try {
-            const wantPage = req.query.page !== undefined || req.query.limit !== undefined;
-            const { page, limit, offset } = pagination(req, 200);
+            const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
+            const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit), 10) || 15));
+            const offset = (page - 1) * limit;
+
+            let hasUserActive = false;
+            try {
+                const [c] = await pool.execute("SHOW COLUMNS FROM users LIKE 'is_active'");
+                hasUserActive = c.length > 0;
+            } catch (_) {
+                /* ignore */
+            }
+
+            const role = String(req.query.role || '').trim();
+            const q = String(req.query.q || '').trim();
+            const verification = String(req.query.verification || '').trim();
+            const active = req.query.active;
+            const dateFrom = String(req.query.dateFrom || '').trim();
+            const dateTo = String(req.query.dateTo || '').trim();
+
+            const conditions = [];
+            const params = [];
+
+            if (role && ['driver', 'shipper', 'admin'].includes(role)) {
+                conditions.push('u.role = ?');
+                params.push(role);
+            }
+            if (q) {
+                conditions.push('(u.full_name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)');
+                const like = `%${q}%`;
+                params.push(like, like, like);
+            }
+            if (verification && ['pending', 'verified', 'rejected'].includes(verification)) {
+                conditions.push('u.verification_status = ?');
+                params.push(verification);
+            }
+            if (hasUserActive && (active === '0' || active === '1')) {
+                conditions.push('COALESCE(u.is_active, 1) = ?');
+                params.push(Number(active));
+            }
+            if (dateFrom) {
+                conditions.push('DATE(u.created_at) >= ?');
+                params.push(dateFrom);
+            }
+            if (dateTo) {
+                conditions.push('DATE(u.created_at) <= ?');
+                params.push(dateTo);
+            }
+
+            const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+            const activeSelect = hasUserActive ? 'COALESCE(u.is_active, 1) AS is_active' : '1 AS is_active';
+
+            const countSql = `SELECT COUNT(*) AS total FROM users u ${whereClause}`;
+            const [countRows] = await pool.query(countSql, params);
+            const total = Number(countRows[0]?.total || 0);
+
+            const listSql = `
+                SELECT u.id, u.full_name, u.email, u.phone, u.role, u.verification_status, u.created_at,
+                       ${activeSelect}
+                FROM users u
+                ${whereClause}
+                ORDER BY u.created_at DESC
+                LIMIT ? OFFSET ?
+            `;
+            const [rows] = await pool.query(listSql, [...params, limit, offset]);
+
+            res.json({
+                success: true,
+                data: rows,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages: Math.max(1, Math.ceil(total / limit)),
+                },
+            });
+        } catch (error) {
+            console.error('[AdminController] browseUsers:', error);
+            res.status(500).json({ success: false, message: 'خطأ في جلب المستخدمين' });
+        }
+    },
+
+    /** لوحة الإدارة — قائمة شحنات مع تصفية وتصفح */
+    browseShipments: async (req, res) => {
+        try {
+            const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
+            const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit), 10) || 20));
+            const offset = (page - 1) * limit;
+
+            const q = String(req.query.q || '').trim();
+            const status = String(req.query.status || '').trim();
+            const dateFrom = String(req.query.dateFrom || '').trim();
+            const dateTo = String(req.query.dateTo || '').trim();
+
+            const conditions = [];
+            const params = [];
+
+            if (q) {
+                conditions.push(
+                    '(CAST(s.id AS CHAR) LIKE ? OR s.pickup_address LIKE ? OR s.dropoff_address LIKE ? OR us.full_name LIKE ? OR ud.full_name LIKE ?)'
+                );
+                const like = `%${q}%`;
+                params.push(like, like, like, like, like);
+            }
+            if (
+                status &&
+                ['pending', 'bidding', 'assigned', 'at_pickup', 'en_route', 'at_dropoff', 'delivered', 'cancelled'].includes(
+                    status
+                )
+            ) {
+                conditions.push('s.status = ?');
+                params.push(status);
+            }
+            if (dateFrom) {
+                conditions.push('DATE(s.created_at) >= ?');
+                params.push(dateFrom);
+            }
+            if (dateTo) {
+                conditions.push('DATE(s.created_at) <= ?');
+                params.push(dateTo);
+            }
+
+            const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
             const countSql = `
-                SELECT COUNT(*) AS total FROM users u
-                JOIN compliance_documents cd ON u.id = cd.user_id
-                WHERE cd.is_verified = 0
+                SELECT COUNT(*) AS total
+                FROM shipments s
+                LEFT JOIN users us ON s.shipper_id = us.id
+                LEFT JOIN users ud ON s.driver_id = ud.id
+                ${whereClause}
             `;
-            const [[countRow]] = await pool.execute(countSql);
+            const [countRows2] = await pool.query(countSql, params);
+            const total = Number(countRows2[0]?.total || 0);
 
-            const dataSql = `
-                SELECT
-                    u.id AS user_id,
-                    u.full_name,
-                    u.phone,
-                    u.role,
-                    cd.document_id,
-                    cd.document_type,
-                    cd.document_url,
-                    cd.uploaded_at
-                FROM users u
-                JOIN compliance_documents cd ON u.id = cd.user_id
-                WHERE cd.is_verified = 0
-                ORDER BY cd.uploaded_at ASC
-                ${wantPage ? 'LIMIT ? OFFSET ?' : ''}
+            const listSql = `
+                SELECT s.id, s.status, s.base_price, s.final_price, s.created_at,
+                       us.full_name AS shipper_name,
+                       ud.full_name AS driver_name
+                FROM shipments s
+                LEFT JOIN users us ON s.shipper_id = us.id
+                LEFT JOIN users ud ON s.driver_id = ud.id
+                ${whereClause}
+                ORDER BY s.created_at DESC
+                LIMIT ? OFFSET ?
             `;
-            const params = wantPage ? [limit, offset] : [];
-            const [rows] = wantPage
-                ? await pool.execute(dataSql, params)
-                : await pool.execute(dataSql);
+            const [rows] = await pool.query(listSql, [...params, limit, offset]);
 
-            if (wantPage) {
-                return res.json({
-                    success: true,
-                    data: rows,
-                    pagination: {
-                        page,
-                        limit,
-                        total: countRow.total,
-                        totalPages: Math.ceil(countRow.total / limit) || 1,
-                    },
+            res.json({
+                success: true,
+                data: rows,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages: Math.max(1, Math.ceil(total / limit)),
+                },
+            });
+        } catch (error) {
+            console.error('[AdminController] browseShipments:', error);
+            res.status(500).json({ success: false, message: 'خطأ في جلب الشحنات' });
+        }
+    },
+
+    getUserDetail: async (req, res) => {
+        try {
+            const id = req.params.id;
+            const [userRows] = await pool.execute(
+                'SELECT id, full_name, email, phone, role, verification_status, created_at FROM users WHERE id = ? LIMIT 1',
+                [id]
+            );
+            if (!userRows.length) {
+                return res.status(404).json({ success: false, message: 'غير موجود' });
+            }
+            const u = userRows[0];
+            let trucks = [];
+            if (u.role === 'driver') {
+                const [tr] = await pool.execute(
+                    `SELECT plate_number, truck_type, verification_status, is_active,
+                            category, axle_count, body_type, payload_capacity, max_weight_tons
+                     FROM trucks WHERE user_id = ? ORDER BY is_active DESC, created_at DESC`,
+                    [id]
+                );
+                trucks = tr;
+
+                const [cards] = await pool.execute(
+                    `SELECT id, file_key, file_url, file_type, expiry_date, verification_status,
+                            rejection_reason, created_at
+                     FROM driver_operating_cards WHERE driver_id = ? ORDER BY created_at DESC LIMIT 1`,
+                    [id]
+                );
+                u.operating_card = cards[0] || null;
+            }
+            let hasActive = false;
+            try {
+                const [c] = await pool.execute("SHOW COLUMNS FROM users LIKE 'is_active'");
+                hasActive = c.length > 0;
+            } catch (_) {
+                /* ignore */
+            }
+            let isActive = 1;
+            if (hasActive) {
+                const [r2] = await pool.execute('SELECT is_active FROM users WHERE id = ?', [id]);
+                if (r2.length) isActive = r2[0].is_active === 0 || r2[0].is_active === false ? 0 : 1;
+            }
+            res.json({ success: true, data: { ...u, trucks, is_active: isActive } });
+        } catch (error) {
+            console.error('[AdminController] getUserDetail:', error);
+            res.status(500).json({ success: false, message: 'خطأ في جلب التفاصيل' });
+        }
+    },
+
+    patchUserActive: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const next = req.body && req.body.is_active;
+            const val = next === true || next === 1 || next === '1' ? 1 : 0;
+            const [c] = await pool.execute("SHOW COLUMNS FROM users LIKE 'is_active'");
+            if (!c.length) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'عمود is_active غير موجود — شغّل migration الإدارة',
                 });
             }
-            res.json({ success: true, data: rows });
+
+            const [targetRows] = await pool.execute('SELECT id, role FROM users WHERE id = ? LIMIT 1', [id]);
+            if (!targetRows.length) {
+                return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+            }
+            if (targetRows[0].role === 'admin') {
+                return res.status(400).json({ success: false, message: 'لا يمكن تعطيل أو تفعيل حساب مدير من هنا' });
+            }
+            if (req.user && Number(req.user.id) === Number(id) && val === 0) {
+                return res.status(400).json({ success: false, message: 'لا يمكنك تعطيل حسابك أثناء الجلسة' });
+            }
+
+            await pool.execute('UPDATE users SET is_active = ? WHERE id = ?', [val, id]);
+            emitAdminDashboard(req, 'admin.user_active', { userId: id, is_active: val });
+            res.json({ success: true });
+        } catch (error) {
+            console.error('[AdminController] patchUserActive:', error);
+            res.status(500).json({ success: false, message: 'فشل التحديث' });
+        }
+    },
+
+    /** إنشاء مستخدم (سائق / شركة) — FR-6 */
+    createUser: async (req, res) => {
+        let connection;
+        try {
+            const body = req.body || {};
+            const fullName = String(body.full_name || '').trim();
+            const email = String(body.email || '').trim().toLowerCase();
+            const phone = String(body.phone || '').trim();
+            const password = String(body.password || '');
+            const role = String(body.role || 'driver').trim();
+
+            if (!fullName || !email || !phone || password.length < 6) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'الاسم والبريد والجوال وكلمة مرور (6 أحرف على الأقل) مطلوبة',
+                });
+            }
+            if (!['driver', 'shipper'].includes(role)) {
+                return res.status(400).json({ success: false, message: 'الدور يجب أن يكون سائق أو شركة نقل' });
+            }
+
+            const [phoneUsed, emailUsed] = await Promise.all([
+                User.existsByPhone(phone),
+                User.existsByEmail(email),
+            ]);
+            if (phoneUsed || emailUsed) {
+                return res.status(400).json({ success: false, message: 'البريد أو الجوال مستخدم مسبقاً' });
+            }
+
+            const hashed = await bcrypt.hash(password, 10);
+            const expiry = '2099-12-31';
+
+            let hasUserActive = false;
+            try {
+                const [col] = await pool.execute("SHOW COLUMNS FROM users LIKE 'is_active'");
+                hasUserActive = col.length > 0;
+            } catch (_) {
+                /* ignore */
+            }
+
+            connection = await pool.getConnection();
+            await connection.beginTransaction();
+
+            let insertSql;
+            let insertParams;
+            if (hasUserActive) {
+                insertSql =
+                    'INSERT INTO users (full_name, email, phone, password, role, license_no, commercial_no, document_path, issue_date, expiry_date, is_active) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)';
+                insertParams = [fullName, email, phone, hashed, role, expiry, 1];
+            } else {
+                insertSql =
+                    'INSERT INTO users (full_name, email, phone, password, role, license_no, commercial_no, document_path, issue_date, expiry_date) VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?)';
+                insertParams = [fullName, email, phone, hashed, role, expiry];
+            }
+
+            const [userInsert] = await connection.execute(insertSql, insertParams);
+            const userId = userInsert.insertId;
+
+            await connection.execute('INSERT INTO wallets (user_id, current_balance) VALUES (?, ?)', [userId, 0]);
+
+            await connection.commit();
+
+            emitAdminDashboard(req, 'admin.user_created', { userId });
+            res.status(201).json({
+                success: true,
+                data: { id: userId, full_name: fullName, email, phone, role },
+            });
+        } catch (error) {
+            if (connection) await connection.rollback();
+            console.error('[AdminController] createUser:', error);
+            res.status(500).json({ success: false, message: error.message || 'فشل إنشاء المستخدم' });
+        } finally {
+            if (connection) connection.release();
+        }
+    },
+
+    /** تعديل بيانات مستخدم — FR-6 */
+    patchUser: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const body = req.body || {};
+
+            const [existingRows] = await pool.execute(
+                'SELECT id, role, email, phone FROM users WHERE id = ? LIMIT 1',
+                [id]
+            );
+            if (!existingRows.length) {
+                return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+            }
+            const existing = existingRows[0];
+
+            const fullName = body.full_name !== undefined ? String(body.full_name).trim() : null;
+            const email = body.email !== undefined ? String(body.email).trim().toLowerCase() : null;
+            const phone = body.phone !== undefined ? String(body.phone).trim() : null;
+            const password = body.password !== undefined ? String(body.password) : null;
+            const role = body.role !== undefined ? String(body.role).trim() : null;
+            const verificationStatus =
+                body.verification_status !== undefined ? String(body.verification_status).trim() : null;
+
+            if (fullName !== null && !fullName) {
+                return res.status(400).json({ success: false, message: 'الاسم غير صالح' });
+            }
+            if (email !== null && !email) {
+                return res.status(400).json({ success: false, message: 'البريد غير صالح' });
+            }
+            if (phone !== null && !phone) {
+                return res.status(400).json({ success: false, message: 'الجوال غير صالح' });
+            }
+            if (password !== null && password.length > 0 && password.length < 6) {
+                return res.status(400).json({ success: false, message: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' });
+            }
+            if (role !== null && !['driver', 'shipper', 'admin'].includes(role)) {
+                return res.status(400).json({ success: false, message: 'دور غير صالح' });
+            }
+            if (
+                verificationStatus !== null &&
+                !['pending', 'verified', 'rejected'].includes(verificationStatus)
+            ) {
+                return res.status(400).json({ success: false, message: 'حالة توثيق غير صالحة' });
+            }
+
+            if (existing.role === 'admin') {
+                if (role !== null && role !== 'admin') {
+                    return res.status(400).json({ success: false, message: 'لا يمكن تغيير دور مدير' });
+                }
+                if (verificationStatus !== null) {
+                    return res.status(400).json({ success: false, message: 'لا يمكن تعديل حالة توثيق مدير' });
+                }
+            }
+
+            if (role !== null && role === 'admin' && existing.role !== 'admin') {
+                return res.status(400).json({ success: false, message: 'لا يمكن ترقية الحساب إلى مدير من هذه الشاشة' });
+            }
+
+            const nextEmail = email !== null ? email : existing.email;
+            const nextPhone = phone !== null ? phone : existing.phone;
+
+            if (email !== null && nextEmail !== existing.email) {
+                const taken = await User.existsByEmail(nextEmail);
+                if (taken) {
+                    return res.status(400).json({ success: false, message: 'البريد مستخدم مسبقاً' });
+                }
+            }
+            if (phone !== null && nextPhone !== existing.phone) {
+                const takenPhone = await User.existsByPhone(nextPhone);
+                if (takenPhone) {
+                    return res.status(400).json({ success: false, message: 'الجوال مستخدم مسبقاً' });
+                }
+            }
+
+            const sets = [];
+            const params = [];
+
+            if (fullName !== null) {
+                sets.push('full_name = ?');
+                params.push(fullName);
+            }
+            if (email !== null) {
+                sets.push('email = ?');
+                params.push(nextEmail);
+            }
+            if (phone !== null) {
+                sets.push('phone = ?');
+                params.push(nextPhone);
+            }
+            if (role !== null) {
+                sets.push('role = ?');
+                params.push(role);
+            }
+            if (verificationStatus !== null) {
+                sets.push('verification_status = ?');
+                params.push(verificationStatus);
+            }
+            if (password !== null && password.length > 0) {
+                sets.push('password = ?');
+                params.push(await bcrypt.hash(password, 10));
+            }
+
+            if (!sets.length) {
+                return res.status(400).json({ success: false, message: 'لا توجد حقول للتحديث' });
+            }
+
+            params.push(id);
+            await pool.execute(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`, params);
+
+            emitAdminDashboard(req, 'admin.user_updated', { userId: id });
+            res.json({ success: true });
+        } catch (error) {
+            console.error('[AdminController] patchUser:', error);
+            res.status(500).json({ success: false, message: 'فشل تحديث المستخدم' });
+        }
+    },
+
+    /** عدم وجود جداول تظلمات بعد — نرجع قائمة فارغة حتى لا يتعطل الواجه */
+    listDisputes: async (req, res) => {
+        const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
+        const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10) || 12));
+        res.json({
+            success: true,
+            data: [],
+            pagination: { page, limit, total: 0, totalPages: 1 },
+        });
+    },
+
+    resolveDisputeStub: async (req, res) => {
+        res.json({ success: true, message: 'لا توجد تظلمات في هذا الإصدار' });
+    },
+
+    activityFeed: async (req, res) => {
+        res.json({ success: true, data: [] });
+    },
+
+    notificationsList: async (req, res) => {
+        res.json({ success: true, data: { unreadCount: 0, items: [] } });
+    },
+
+    notificationsRead: async (req, res) => {
+        res.json({ success: true });
+    },
+
+    getPendingUsers: async (req, res) => {
+        try {
+            const page = Math.max(1, parseInt(String(req.query.page), 10) || 1);
+            const limit = Math.min(50, Math.max(1, parseInt(String(req.query.limit), 10) || 8));
+            const offset = (page - 1) * limit;
+
+            const [countRowsPending] = await pool.execute(
+                `
+                SELECT (
+                  (SELECT COUNT(*) FROM compliance_documents cd WHERE cd.is_verified = 0)
+                  +
+                  (SELECT COUNT(*) FROM driver_operating_cards oc WHERE oc.verification_status = 'pending')
+                ) AS total
+                `
+            );
+            const total = Number(countRowsPending[0]?.total || 0);
+
+            const collate = 'utf8mb4_unicode_ci';
+            const [rows] = await pool.execute(
+                `
+                SELECT * FROM (
+                  SELECT
+                    u.id AS user_id,
+                    u.full_name COLLATE ${collate} AS full_name,
+                    u.phone COLLATE ${collate} AS phone,
+                    u.role COLLATE ${collate} AS role,
+                    cd.document_id AS item_id,
+                    cd.document_type COLLATE ${collate} AS document_type,
+                    cd.document_url COLLATE ${collate} AS document_url,
+                    cd.uploaded_at,
+                    CAST('compliance' AS CHAR CHARACTER SET utf8mb4) COLLATE ${collate} AS source_kind
+                  FROM users u
+                  JOIN compliance_documents cd ON u.id = cd.user_id
+                  WHERE cd.is_verified = 0
+                  UNION ALL
+                  SELECT
+                    u.id AS user_id,
+                    u.full_name COLLATE ${collate} AS full_name,
+                    u.phone COLLATE ${collate} AS phone,
+                    u.role COLLATE ${collate} AS role,
+                    oc.id AS item_id,
+                    CAST('operating_card' AS CHAR CHARACTER SET utf8mb4) COLLATE ${collate} AS document_type,
+                    CAST(COALESCE(oc.file_key, oc.file_url) AS CHAR CHARACTER SET utf8mb4) COLLATE ${collate} AS document_url,
+                    oc.created_at AS uploaded_at,
+                    CAST('operating_card' AS CHAR CHARACTER SET utf8mb4) COLLATE ${collate} AS source_kind
+                  FROM users u
+                  JOIN driver_operating_cards oc ON u.id = oc.driver_id
+                  WHERE oc.verification_status = 'pending'
+                ) pending_items
+                ORDER BY uploaded_at ASC
+                LIMIT ? OFFSET ?
+            `,
+                [limit, offset]
+            );
+
+            res.json({
+                success: true,
+                data: rows,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages: Math.max(1, Math.ceil(total / limit)),
+                },
+            });
         } catch (error) {
             console.error('[AdminController] Error in getPendingUsers:', error);
             res.status(500).json({ success: false, message: 'خطأ في جلب طلبات التوثيق' });
@@ -905,7 +713,8 @@ const AdminController = {
                 return res.status(400).json({ success: false, message: 'معرف المستند مفقود' });
             }
 
-            const finalStatus = status === 'verified' ? 1 : status === 'rejected' ? 2 : 0;
+            // الحالة: 1 = مقبول، 2 = مرفوض، 0 = معلق
+            const finalStatus = status === 'verified' ? 1 : (status === 'rejected' ? 2 : 0);
 
             await pool.execute(
                 'UPDATE compliance_documents SET is_verified = ?, verified_by = ?, verified_at = CURRENT_TIMESTAMP, verification_notes = ? WHERE document_id = ?',
@@ -913,27 +722,18 @@ const AdminController = {
             );
 
             if (status === 'verified') {
-                const [docRows] = await pool.execute(
-                    'SELECT user_id FROM compliance_documents WHERE document_id = ?',
-                    [docId]
-                );
+                const [docRows] = await pool.execute('SELECT user_id FROM compliance_documents WHERE document_id = ?', [docId]);
                 if (docRows.length > 0) {
-                    await pool.execute('UPDATE users SET verification_status = "verified" WHERE id = ?', [
-                        docRows[0].user_id,
-                    ]);
+                    await pool.execute('UPDATE users SET verification_status = "verified" WHERE id = ?', [docRows[0].user_id]);
                 }
             } else if (status === 'rejected') {
-                const [docRows] = await pool.execute(
-                    'SELECT user_id FROM compliance_documents WHERE document_id = ?',
-                    [docId]
-                );
+                const [docRows] = await pool.execute('SELECT user_id FROM compliance_documents WHERE document_id = ?', [docId]);
                 if (docRows.length > 0) {
-                    await pool.execute('UPDATE users SET verification_status = "rejected" WHERE id = ?', [
-                        docRows[0].user_id,
-                    ]);
+                    await pool.execute('UPDATE users SET verification_status = "rejected" WHERE id = ?', [docRows[0].user_id]);
                 }
             }
 
+            emitAdminDashboard(req, 'document.verified', { docId, status });
             res.json({ success: true, message: 'تم تحديث الحالة بنجاح' });
         } catch (error) {
             console.error('[AdminController] Error in verifyDocument:', error);
@@ -941,77 +741,137 @@ const AdminController = {
         }
     },
 
-    /** Stream file through API (Bearer auth) — avoids broken presigned URLs & iframe/X-Frame blocks */
-    streamDocumentPreview: async (req, res) => {
-        const raw = req.query.url;
-        if (!raw || typeof raw !== 'string') {
-            return res.status(400).json({ success: false, message: 'الرابط مفقود' });
-        }
-        return sendDocumentPreviewForRaw(raw, res);
-    },
-
-    /** نفس البث لكن المسار يُجلب من قاعدة البيانات (أثبت من ?url= مع الروابط الطويلة/الترميز) */
-    streamDocumentPreviewById: async (req, res) => {
-        try {
-            const docId = parseInt(String(req.params.docId || ''), 10);
-            if (!docId) {
-                return res.status(400).json({ success: false, message: 'معرف المستند غير صالح' });
-            }
-            const [rows] = await pool.execute(
-                'SELECT document_url FROM compliance_documents WHERE document_id = ? LIMIT 1',
-                [docId]
-            );
-            if (!rows?.length || !rows[0].document_url) {
-                return res.status(404).json({ success: false, message: 'المستند غير موجود في قاعدة البيانات' });
-            }
-            return sendDocumentPreviewForRaw(String(rows[0].document_url).trim(), res);
-        } catch (error) {
-            console.error('[AdminController] streamDocumentPreviewById:', error);
-            return res.status(500).json({ success: false, message: 'فشل جلب المستند' });
-        }
-    },
-
     getSignedUrl: async (req, res) => {
         try {
-            let urlRef = req.query.url;
-            if (!urlRef && req.query.docId) {
-                const docId = parseInt(String(req.query.docId || ''), 10);
-                if (!docId) {
-                    return res.status(400).json({ success: false, message: 'معرف المستند غير صالح' });
+            let source = req.query.url;
+            const docId = req.query.docId;
+
+            const cardId = req.query.cardId || req.query.operatingCardId;
+            if (cardId && !source) {
+                const [rows] = await pool.execute(
+                    'SELECT file_key, file_url FROM driver_operating_cards WHERE id = ? LIMIT 1',
+                    [cardId]
+                );
+                if (!rows.length) {
+                    return res.status(404).json({ success: false, message: 'بطاقة التشغيل غير موجودة' });
                 }
+                source = rows[0].file_key || rows[0].file_url;
+            }
+
+            if (docId && !source) {
                 const [rows] = await pool.execute(
                     'SELECT document_url FROM compliance_documents WHERE document_id = ? LIMIT 1',
                     [docId]
                 );
-                if (!rows?.length || !rows[0].document_url) {
+                if (!rows.length || !rows[0].document_url) {
                     return res.status(404).json({ success: false, message: 'المستند غير موجود' });
                 }
-                urlRef = rows[0].document_url;
-            }
-            if (!urlRef) return res.status(400).json({ success: false, message: 'الرابط مفقود' });
-
-            const raw = String(urlRef || '').trim();
-            let signedUrl = await generatePresignedUrl(raw);
-
-            if (!signedUrl && (raw.startsWith('http://') || raw.startsWith('https://'))) {
-                signedUrl = raw;
+                source = rows[0].document_url;
             }
 
-            if (!signedUrl) {
-                return res.status(503).json({
-                    success: false,
-                    message:
-                        'تعذر توليد رابط مؤقت. تحقق من MinIO أو استخدم معاينة المستند من لوحة التحكم.',
-                });
+            if (!source) {
+                return res.status(400).json({ success: false, message: 'الرابط مفقود' });
             }
 
-            const fileType = inferPreviewKindFromRef(raw);
+            const signedUrl = await generatePresignedUrl(source);
+            const keyHint = resolveS3ObjectKey(String(source)).toLowerCase();
+            const lowerHint = keyHint || String(source).toLowerCase();
+            const fileType = lowerHint.endsWith('.pdf') ? 'pdf' : 'image';
 
-            console.log(`[AdminController] Signing URL for ${fileType}:`, raw);
-            res.json({ success: true, signedUrl, fileType, previewKind: fileType });
+            if (
+                !signedUrl ||
+                (!String(signedUrl).startsWith('http://') && !String(signedUrl).startsWith('https://'))
+            ) {
+                return res.status(502).json({ success: false, message: 'فشل إنشاء رابط المعاينة' });
+            }
+
+            console.log(`[AdminController] Signing URL for ${fileType}:`, source);
+            res.json({ success: true, signedUrl, fileType });
         } catch (error) {
             console.error('[AdminController] Error signing URL:', error);
             res.status(500).json({ success: false, message: 'فشل توقيع الرابط' });
+        }
+    },
+
+    /** معاينة عبر السيرفر (نفس المنشأ) — احتياطي عند فشل الرابط الموقّع أو حظر iframe */
+    previewDocumentById: async (req, res) => {
+        try {
+            const id = req.params.id;
+            const kind = String(req.query.kind || 'compliance');
+            let key = null;
+
+            if (kind === 'operating_card') {
+                const [rows] = await pool.execute(
+                    'SELECT file_key, file_url FROM driver_operating_cards WHERE id = ? LIMIT 1',
+                    [id]
+                );
+                if (!rows.length) {
+                    return res.status(404).json({ success: false, message: 'بطاقة التشغيل غير موجودة' });
+                }
+                key = resolveS3ObjectKey(rows[0].file_key || rows[0].file_url);
+            } else {
+                const [rows] = await pool.execute(
+                    'SELECT document_url FROM compliance_documents WHERE document_id = ? LIMIT 1',
+                    [id]
+                );
+                if (!rows.length || !rows[0].document_url) {
+                    return res.status(404).json({ success: false, message: 'المستند غير موجود' });
+                }
+                key = resolveS3ObjectKey(rows[0].document_url);
+            }
+
+            if (!key) return res.status(400).json({ success: false, message: 'مسار الملف غير صالح' });
+            await streamS3KeyToResponse(res, key);
+        } catch (error) {
+            console.error('[AdminController] previewDocumentById:', error);
+            if (!res.headersSent) res.status(500).json({ success: false, message: 'فشل المعاينة' });
+        }
+    },
+
+    verifyOperatingCard: async (req, res) => {
+        try {
+            const cardId = req.params.cardId;
+            const status = req.body.status || null;
+            const notes = req.body.notes || req.body.rejection_reason || null;
+
+            if (!cardId) {
+                return res.status(400).json({ success: false, message: 'معرف بطاقة التشغيل مفقود' });
+            }
+            if (!['verified', 'rejected'].includes(status)) {
+                return res.status(400).json({ success: false, message: 'حالة غير صالحة' });
+            }
+
+            const OperatingCard = require('../models/OperatingCard');
+            const updated = await OperatingCard.updateStatus(cardId, {
+                status,
+                rejection_reason: status === 'rejected' ? notes : null,
+            });
+            if (!updated) {
+                return res.status(404).json({ success: false, message: 'بطاقة التشغيل غير موجودة' });
+            }
+
+            emitAdminDashboard(req, 'operating_card.verified', { cardId, status });
+            res.json({
+                success: true,
+                message: `تم ${status === 'verified' ? 'اعتماد' : 'رفض'} بطاقة التشغيل بنجاح`,
+            });
+        } catch (error) {
+            console.error('[AdminController] verifyOperatingCard:', error);
+            res.status(500).json({ success: false, message: 'فشل تحديث بطاقة التشغيل' });
+        }
+    },
+
+    previewDocumentByQuery: async (req, res) => {
+        try {
+            let url = req.query.url;
+            if (!url) return res.status(400).json({ success: false, message: 'الرابط مفقود' });
+            url = decodeURIComponent(String(url));
+            const key = resolveS3ObjectKey(url);
+            if (!key) return res.status(400).json({ success: false, message: 'مسار الملف غير صالح' });
+            await streamS3KeyToResponse(res, key);
+        } catch (error) {
+            console.error('[AdminController] previewDocumentByQuery:', error);
+            if (!res.headersSent) res.status(500).json({ success: false, message: 'فشل المعاينة' });
         }
     },
 
@@ -1019,6 +879,7 @@ const AdminController = {
         try {
             const { id } = req.params;
             await pool.execute('UPDATE users SET verification_status = "verified" WHERE id = ?', [id]);
+            emitAdminDashboard(req, 'admin.user_verified', { userId: id });
             res.json({ success: true, message: 'تم توثيق المستخدم بنجاح' });
         } catch (error) {
             res.status(500).json({ success: false, message: 'خطأ في توثيق المستخدم' });
@@ -1064,6 +925,62 @@ const AdminController = {
             res.json({ success: true, data: { users, shipments } });
         } catch (error) {
             res.status(500).json({ success: false, message: 'خطأ في تصدير التقرير' });
+        }
+    },
+
+    /** آخر 7 أيام — شحنات جديدة مقابل عروض أسعار (للوحة التحكم) */
+    overviewCharts: async (req, res) => {
+        try {
+            const days = 7;
+            const [shipRows] = await pool.execute(
+                `SELECT DATE(created_at) AS d, COUNT(*) AS c
+                 FROM shipments
+                 WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                 GROUP BY DATE(created_at)`,
+                [days - 1],
+            );
+            const [bidRows] = await pool.execute(
+                `SELECT DATE(created_at) AS d, COUNT(*) AS c
+                 FROM bids
+                 WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                 GROUP BY DATE(created_at)`,
+                [days - 1],
+            );
+
+            const toKey = (d) => {
+                if (d == null) return '';
+                if (d instanceof Date) return d.toISOString().slice(0, 10);
+                const s = String(d);
+                return s.length >= 10 ? s.slice(0, 10) : s;
+            };
+
+            const map = {};
+            const bump = (key, field, n) => {
+                if (!key) return;
+                if (!map[key]) map[key] = { date: key, shipments: 0, bids: 0 };
+                map[key][field] += n;
+            };
+
+            for (const r of shipRows || []) bump(toKey(r.d), 'shipments', Number(r.c) || 0);
+            for (const r of bidRows || []) bump(toKey(r.d), 'bids', Number(r.c) || 0);
+
+            for (let i = days - 1; i >= 0; i -= 1) {
+                const dt = new Date();
+                dt.setHours(0, 0, 0, 0);
+                dt.setDate(dt.getDate() - i);
+                const key = dt.toISOString().slice(0, 10);
+                if (!map[key]) map[key] = { date: key, shipments: 0, bids: 0 };
+            }
+
+            const series = Object.keys(map)
+                .sort()
+                .slice(-days)
+                .map((k) => map[k]);
+
+            res.json({ success: true, data: { series } });
+        } catch (error) {
+            console.error('[AdminController] overviewCharts:', error);
+            res.status(500).json({ success: false, message: 'خطأ في بيانات الرسوم' });
         }
     },
 };

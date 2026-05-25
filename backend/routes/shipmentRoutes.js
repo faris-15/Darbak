@@ -11,7 +11,7 @@ const {
   getShipmentsForDriver,
   updateShipmentStatus,
 } = require('../controllers/shipmentController');
-const { requireAuth } = require('../middleware/authMiddleware');
+const { requireAuth, requireKybVerifiedIfDriverOrShipper } = require('../middleware/authMiddleware');
 const { upload, logS3SdkErrorResponsePreview, sanitizeApiErrorMessage } = require('../utils/s3Config'); // استيراد إعدادات S3 الجاهزة
 
 const router = express.Router();
@@ -49,12 +49,20 @@ const maybeMultipart = (req, res, next) => {
 router.post(
   '/',
   requireAuth,
+  requireKybVerifiedIfDriverOrShipper,
   [
     body('weightKg').isNumeric(),
     body('cargoDescription').notEmpty(),
     body('pickupAddress').notEmpty(),
     body('dropoffAddress').notEmpty(),
-    body('basePrice').isNumeric(),
+    body('suggestedPrice').optional({ nullable: true }).isNumeric(),
+    body('basePrice').optional({ nullable: true }).isNumeric(),
+    body().custom((_, { req }) => {
+      if (req.body.suggestedPrice === undefined && req.body.basePrice === undefined) {
+        throw new Error('السعر المقترح مطلوب');
+      }
+      return true;
+    }),
     body('expectedDeliveryDate').isISO8601(),
   ],
   (req, res) => {
@@ -68,11 +76,22 @@ router.get('/', listShipments);
 router.get('/driver', requireAuth, getShipmentsForDriver);
 router.get('/driver/active', requireAuth, getActiveShipmentsForDriver);
 router.get('/:id/contract', requireAuth, getShipmentContractPdfUrl);
-router.post('/:id/live-location', requireAuth, recordLiveLocation);
+router.post(
+  '/:id/live-location',
+  requireAuth,
+  requireKybVerifiedIfDriverOrShipper,
+  recordLiveLocation,
+);
 router.get('/:id', getShipment);
 
 // استخدام S3 للرفع عند تحديث الحالة (multipart فقط عند وجود ملف)
-router.patch('/:id/status', requireAuth, maybeMultipart, updateShipmentStatus);
+router.patch(
+  '/:id/status',
+  requireAuth,
+  requireKybVerifiedIfDriverOrShipper,
+  maybeMultipart,
+  updateShipmentStatus,
+);
 
 router.post('/:id/complete', [body('bidId').isInt(), body('actualDeliveryDate').isISO8601()], (req, res) => {
   const errors = validationResult(req);

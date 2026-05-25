@@ -2,6 +2,7 @@ const Bid = require('../models/Bid');
 const Shipment = require('../models/Shipment');
 const Notification = require('../models/Notification');
 const pool = require('../config/db');
+const SAR_SYMBOL = '⃁';
 
 const createBid = async (req, res) => {
   try {
@@ -50,7 +51,7 @@ const createBid = async (req, res) => {
       const currentLowest = lowestBids[0].bid_amount;
       if (Number(bidAmount) >= Number(currentLowest)) {
         return res.status(400).json({
-          message: `يجب أن يكون عرضك أقل من أفضل عرض حالي (${currentLowest} ريال)`,
+          message: `يجب أن يكون عرضك أقل من أفضل عرض حالي (${currentLowest} ${SAR_SYMBOL})`,
         });
       }
     }
@@ -66,7 +67,7 @@ const createBid = async (req, res) => {
         userId: shipment.shipper_id,
         notificationType: 'new_bid',
         title: 'عرض جديد',
-        message: `حصلت على عرض جديد بسعر ${bidAmount} ريال`,
+        message: `حصلت على عرض جديد بسعر ${bidAmount} ${SAR_SYMBOL}`,
         relatedShipmentId: shipmentId,
         relatedBidId: bid.id,
       });
