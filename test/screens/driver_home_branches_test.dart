@@ -67,7 +67,7 @@ void main() {
           tester,
           ShipmentSummaryScreen(shipment: shipment),
         );
-        expect(find.textContaining('جزاء تأخير'), findsOneWidget);
+        expect(find.textContaining('تأخير: تم تطبيق خصم'), findsOneWidget);
         expect(find.text('العقد الإلكتروني'), findsOneWidget);
       },
     );

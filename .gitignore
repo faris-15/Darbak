@@ -86,10 +86,12 @@ backend/uploads/epod/*
 !backend/uploads/epod/.gitkeep
 
 # ============================================================================
-# QA / Test reports (regenerated)
+# QA / Test reports
 # ============================================================================
 .tmp-qa-report/
-docs/test-report/
+docs/test-report/*
+!docs/test-report/
+!docs/test-report/index.html
 
 # ============================================================================
 # Playwright E2E (e2e/admin-dashboard)

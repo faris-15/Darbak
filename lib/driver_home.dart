@@ -859,7 +859,7 @@ double? _shipmentDouble(dynamic v) {
   return double.tryParse(v.toString());
 }
 
-/// Active shipments: grace 0 days after [final_delivery_date] or [expected_delivery_date], then +5%/day capped at 25%.
+/// Active shipments: 1 grace day after [final_delivery_date] or [expected_delivery_date], then +5%/day capped at 25%.
 /// Exposed for unit tests (late-delivery penalty math).
 @visibleForTesting
 Map<String, dynamic>? latePenaltyBannerInfo(Map<String, dynamic> s) =>

@@ -20,7 +20,7 @@ void main() {
         latePenaltyBannerInfo({
           'status': 'en_route',
           'expected_delivery_date':
-              DateTime.now().subtract(const Duration(days: 3)).toIso8601String(),
+              DateTime.now().add(const Duration(days: 1)).toIso8601String(),
           'accepted_bid_amount': 2000,
         }),
         isNull,
@@ -47,7 +47,10 @@ void main() {
         'late_penalty_percent': 15,
         'late_penalty_amount': 150,
       });
-      expect(info, {'percent': 15, 'amount': 150.0});
+      expect(info, isNotNull);
+      expect(info!['percent'], 15);
+      expect(info['amount'], 150.0);
+      expect(info['status'], 'penalty');
     });
   });
 }

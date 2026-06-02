@@ -149,7 +149,7 @@ void main() {
       callback: (_) async {
         await _pump(tester, ShipmentSummaryScreen(shipment: shipment));
         expect(find.byType(ShipmentSummaryScreen), findsOneWidget);
-        expect(find.textContaining('جزاء تأخير'), findsOneWidget);
+        expect(find.textContaining('تأخير: تم تطبيق خصم'), findsOneWidget);
       },
     );
   });
