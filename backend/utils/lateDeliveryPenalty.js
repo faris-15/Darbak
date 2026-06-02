@@ -17,8 +17,9 @@ const calendarDaysFrom = (a, b) => {
 };
 
 /**
- * Grace period after final deadline (default 5 full days with no penalty).
- * Day 6 after deadline: 5%; each further calendar day +5% until cap (default 25%).
+ * Grace period after the final deadline (default 1 full day with no penalty).
+ * Day 2 after deadline: 5%; each further calendar day +5% until cap (default 25%),
+ * which is reached on day 6 past the deadline.
  *
  * @param {Date|string} deadline - Final delivery date (الموعد النهائي)
  * @param {Date|string} asOfDate - "Today" for in-flight shipments, or actual delivery date when completing
@@ -27,7 +28,7 @@ const calendarDaysFrom = (a, b) => {
  * @returns {{ percent: number, amount: number, daysPastGrace: number }}
  */
 const computeLatePenaltyFromDeadline = (deadline, asOfDate, totalPrice, options = {}) => {
-  const graceDays = options.graceDays ?? 5;
+  const graceDays = options.graceDays ?? 1;
   const dailyPercent = options.dailyPercent ?? 5;
   const capPercent = options.capPercent ?? 25;
   const price = Number(totalPrice);

@@ -43,6 +43,11 @@ const maybeMultipart = (req, res, next) => {
   if (ct.includes('multipart/form-data')) {
     return handleUpload(req, res, next);
   }
+  // Clients may upload the ePOD to object storage first, then reference the key.
+  const epodKey = req.body?.epodPhoto;
+  if (typeof epodKey === 'string' && epodKey.trim()) {
+    return handleUpload(req, res, next);
+  }
   return next();
 };
 

@@ -5,17 +5,24 @@ import '../api_service.dart';
 /// يفتح رابط العقد في متصفح الجهاز الخارجي أو عارض الـ PDF
 Future<void> openShipmentContractPdfInApp(
   BuildContext context,
-  int shipmentId,
-) async {
+  int shipmentId, {
+  Future<String?> Function(int shipmentId)? getSignedUrl,
+  Future<bool> Function(Uri url, LaunchMode mode)? launch,
+}) async {
   final messenger = ScaffoldMessenger.maybeOf(context);
+  final fetchSignedUrl =
+      getSignedUrl ?? ApiService.getShipmentContractSignedUrl;
+  final launchExternal = launch ?? (url, mode) => launchUrl(url, mode: mode);
 
   try {
     // 1. جلب الرابط الموقع من السيرفر
-    final urlStr = await ApiService.getShipmentContractSignedUrl(shipmentId);
+    final urlStr = await fetchSignedUrl(shipmentId);
 
     if (urlStr == null || urlStr.isEmpty) {
       messenger?.showSnackBar(
-        const SnackBar(content: Text('تعذر جلب رابط العقد. تأكد من وجود العقد في النظام.')),
+        const SnackBar(
+          content: Text('تعذر جلب رابط العقد. تأكد من وجود العقد في النظام.'),
+        ),
       );
       return;
     }
@@ -25,9 +32,9 @@ Future<void> openShipmentContractPdfInApp(
     // 2. محاولة فتح الرابط مباشرة
     // ملاحظة: تم استخدام LaunchMode.externalApplication لضمان استجابة نظام أندرويد لملفات PDF
     try {
-      final launched = await launchUrl(
+      final launched = await launchExternal(
         url,
-        mode: LaunchMode.externalApplication,
+        LaunchMode.externalApplication,
       );
 
       if (!launched) {
@@ -36,7 +43,11 @@ Future<void> openShipmentContractPdfInApp(
     } catch (e) {
       debugPrint('Launch Error: $e');
       messenger?.showSnackBar(
-        const SnackBar(content: Text('لا يمكن فتح الرابط. يرجى التأكد من وجود متصفح إنترنت مثبت.')),
+        const SnackBar(
+          content: Text(
+            'لا يمكن فتح الرابط. يرجى التأكد من وجود متصفح إنترنت مثبت.',
+          ),
+        ),
       );
     }
   } catch (e) {

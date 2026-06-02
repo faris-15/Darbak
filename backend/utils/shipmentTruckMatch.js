@@ -8,8 +8,9 @@ function normalizeGroup(value) {
 
 function buildTruckRequirementPayload(raw = {}, weightKg = null) {
   const category = raw.required_truck_category || raw.requiredTruckCategory || raw.category || null;
+  const rawGroup = raw.required_truck_group || raw.requiredTruckGroup || raw.truckGroup || null;
   const group =
-    normalizeGroup(raw.required_truck_group || raw.requiredTruckGroup || raw.truckGroup) ||
+    normalizeGroup(rawGroup) ||
     getCategoryById(category)?.group ||
     null;
 
@@ -37,7 +38,7 @@ function buildTruckRequirementPayload(raw = {}, weightKg = null) {
     return { ok: false, error: 'فئة الشاحنة المطلوبة غير معروفة' };
   }
 
-  if (group && !Object.values(TRUCK_GROUPS).includes(group)) {
+  if (rawGroup && !normalizeGroup(rawGroup)) {
     return { ok: false, error: 'مجموعة الشاحنة المطلوبة غير صالحة' };
   }
 

@@ -1,0 +1,114 @@
+name: Enterprise QA
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+
+concurrency:
+  group: qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend Jest
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit, integration, socket tests with coverage
+        run: npm run test:ci
+
+      - name: Upload backend coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: backend/coverage
+
+  flutter:
+    name: Flutter Analyze + Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Run Flutter tests with coverage
+        run: flutter test --coverage
+
+      - name: Check Flutter coverage summary
+        run: dart run tool/check_lcov_min.dart coverage/lcov.info --min=7
+
+      - name: Upload Flutter coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: flutter-coverage
+          path: coverage
+
+  qa-report:
+    name: Unified QA HTML report
+    needs: [backend, flutter]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install backend dependencies
+        run: npm ci
+        working-directory: backend
+
+      - name: Install Flutter dependencies
+        run: flutter pub get
+
+      - name: Generate unified QA HTML dashboard
+        run: node tool/generate_test_report.js
+        continue-on-error: true
+
+      - name: Upload QA dashboard
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qa-dashboard
+          path: docs/test-report

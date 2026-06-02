@@ -32,10 +32,7 @@ class ChatMediaService {
 
     final extension = _extensionOf(image.name, fallback: 'jpg');
     final bytes = await image.readAsBytes();
-    if (bytes.isEmpty) throw DarbakException('الصورة فارغة');
-    if (bytes.length > ApiService.maxChatImageBytes) {
-      throw DarbakException('حجم الصورة يجب ألا يتجاوز 10 ميجابايت');
-    }
+    validateImage(byteLength: bytes.length);
     return PickedChatMedia(
       fileName: _safeFileName('photo', extension),
       bytes: bytes,
@@ -58,10 +55,7 @@ class ChatMediaService {
     );
     final path = compressed?.path ?? video.path;
     final bytes = await File(path).readAsBytes();
-    if (bytes.isEmpty) throw DarbakException('الفيديو فارغ');
-    if (bytes.length > ApiService.maxChatVideoBytes) {
-      throw DarbakException('حجم الفيديو يجب ألا يتجاوز 50 ميجابايت');
-    }
+    validateVideo(byteLength: bytes.length);
     final extension = _extensionOf(path, fallback: 'mp4');
     return PickedChatMedia(
       fileName: _safeFileName('video', extension),
@@ -79,5 +73,19 @@ class ChatMediaService {
   static String _safeFileName(String prefix, String extension) {
     final safeExtension = extension == 'jpeg' ? 'jpg' : extension;
     return '$prefix-${DateTime.now().millisecondsSinceEpoch}.$safeExtension';
+  }
+
+  static void validateImage({required int byteLength}) {
+    if (byteLength <= 0) throw DarbakException('الصورة فارغة');
+    if (byteLength > ApiService.maxChatImageBytes) {
+      throw DarbakException('حجم الصورة يجب ألا يتجاوز 10 ميجابايت');
+    }
+  }
+
+  static void validateVideo({required int byteLength}) {
+    if (byteLength <= 0) throw DarbakException('الفيديو فارغ');
+    if (byteLength > ApiService.maxChatVideoBytes) {
+      throw DarbakException('حجم الفيديو يجب ألا يتجاوز 50 ميجابايت');
+    }
   }
 }

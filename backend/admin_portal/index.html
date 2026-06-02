@@ -47,6 +47,8 @@
         .pulse-dot::after { content: ''; position: absolute; width: 100%; height: 100%; background: inherit; border-radius: inherit; animation: pulse 2s infinite; }
         @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(3); opacity: 0; } }
         .modal { display: none; position: fixed; inset: 0; background: rgba(27,31,36,0.65); z-index: 1000; backdrop-filter: blur(8px); }
+        /* مودال المعاينة قد يُفتح من داخل مودال آخر (مثل تفاصيل الشحنة) — يجب أن يبقى فوق الجميع */
+        #previewModal { z-index: 1100; }
         .modal-content { background: white; width: 95%; max-width: 900px; margin: 30px auto; border-radius: 24px; overflow: hidden; display: flex; flex-direction: column; max-height: 90vh; min-height: 0; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
@@ -67,7 +69,7 @@
                 <img src="/assets/animations/assets-logo.jpeg" class="w-full h-full object-cover" alt="" onerror="this.src='https://ui-avatars.com/api/?name=D&background=088A3B&color=fff'">
             </div>
             <div>
-                <span class="text-lg font-black text-white tracking-tight block">دربك برو</span>
+                <span class="text-lg font-black text-white tracking-tight block">دربك</span>
                 <span class="text-[10px] font-bold text-darbak-light-green uppercase tracking-wider">لوحة الإدارة</span>
             </div>
         </div>
@@ -79,7 +81,7 @@
             <p class="nav-section-title pt-6">المراقبة</p>
             <a onclick="showSection('sniffer')" class="nav-link" id="nav-sniffer"><i class="fas fa-satellite-dish w-5 text-center text-darbak-orange"></i>النظام</a>
             <p class="nav-section-title pt-6">الجلسة</p>
-            <button type="button" id="logout-btn" class="nav-link text-darbak-danger hover:bg-white/5 w-[calc(100%-24px)]"><i class="fas fa-power-off w-5 text-center"></i> خروج آمن</button>
+            <button type="button" id="logout-btn" class="nav-link text-darbak-danger hover:bg-white/5 w-[calc(100%-24px)]"><i class="fas fa-power-off w-5 text-center"></i> خروج </button>
         </nav>
     </aside>
 
@@ -467,6 +469,19 @@
                 <button type="button" onclick="closeUserDetail()" class="w-10 h-10 hover:bg-white/10 rounded-xl text-xl">&times;</button>
             </div>
             <div id="user-detail-body" class="p-8 text-right text-sm space-y-3 max-h-[70vh] overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <!-- Shipment detail modal (ePOD Preview) -->
+    <div id="shipment-detail-modal" class="modal">
+        <div class="modal-content max-w-2xl">
+            <div class="bg-slate-900 text-white p-6 flex justify-between items-center">
+                <h3 id="shipment-detail-title" class="font-black flex items-center gap-2"><i class="fas fa-truck-loading text-primary"></i> تفاصيل الشحنة</h3>
+                <button type="button" onclick="closeShipmentDetail()" class="w-10 h-10 hover:bg-white/10 rounded-xl text-xl">&times;</button>
+            </div>
+            <div id="shipment-detail-body" class="p-8 text-right text-sm space-y-6 max-h-[75vh] overflow-y-auto">
+                <!-- Content injected here -->
+            </div>
         </div>
     </div>
 
@@ -1023,6 +1038,9 @@
                         <td class="p-4 text-xs text-slate-600">${esc(s.driver_name || '—')}</td>
                         <td class="p-4"><span class="px-3 py-1 rounded-full text-[9px] font-black uppercase ${getStatusStyle(s.status)}">${esc(s.status)}</span></td>
                         <td class="p-4 font-black text-primary">${sarMoney(s.final_price || s.base_price || 0)}</td>
+                        <td class="p-4 text-left">
+                            <button type="button" onclick="openShipmentDetail(${s.id})" class="px-3 py-1.5 rounded-lg bg-slate-800 text-white text-[10px] font-bold hover:bg-slate-900 transition-colors">تفاصيل / ePOD</button>
+                        </td>
                     </tr>`).join('');
             } catch (e) {
                 body.innerHTML = '<tr><td colspan="5" class="py-16 text-center text-rose-500">فشل الاتصال</td></tr>';
@@ -1075,6 +1093,194 @@
 
         function closeUserDetail() {
             document.getElementById('user-detail-modal').style.display = 'none';
+        }
+
+        async function openShipmentDetail(id) {
+            const modal = document.getElementById('shipment-detail-modal');
+            const wrap = document.getElementById('shipment-detail-body');
+            wrap.innerHTML = '<div class="flex justify-center py-10"><div class="animate-spin h-10 w-10 border-2 border-primary border-t-transparent rounded-full"></div></div>';
+            modal.style.display = 'block';
+
+            try {
+                const res = await fetch(`${API_URL}/admin/shipments/${id}/detail`, { headers: authHeaders() });
+                const data = await res.json();
+
+                if (!data.success) throw new Error(data.message);
+                const s = data.data;
+
+                let podHtml = '';
+                const historyWithPhotos = (s.history || []).filter(h => h.photo_path);
+
+                if (historyWithPhotos.length > 0) {
+                    podHtml = `
+                        <div class="mt-8">
+                            <h4 class="text-slate-800 font-black text-sm mb-4 flex items-center gap-2">
+                                <i class="fas fa-camera text-primary"></i> المرفقات وإثباتات التسليم (ePOD)
+                            </h4>
+                            <div class="grid grid-cols-2 sm:grid-cols-3 gap-4" id="shipment-epod-grid">
+                                ${historyWithPhotos.map(h => {
+                                    const isPdf = String(h.photo_path).toLowerCase().endsWith('.pdf');
+                                    const icon = isPdf ? 'fa-file-pdf text-rose-500' : 'fa-image text-emerald-500';
+                                    const encPath = encodeURIComponent(h.photo_path);
+
+                                    return `
+                                        <div class="group border border-slate-100 rounded-2xl p-3 bg-white hover:bg-slate-50 hover:border-primary/30 transition-all cursor-pointer shadow-sm"
+                                             data-action="preview-shipment-pod"
+                                             data-photo-path="${encPath}"
+                                             data-doc-type="${isPdf ? 'pdf' : 'image'}">
+                                            <div class="flex items-center gap-2 mb-3">
+                                                <div class="w-7 h-7 rounded-lg bg-slate-100 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                                                    <i class="fas ${icon} text-xs"></i>
+                                                </div>
+                                                <div class="overflow-hidden">
+                                                    <div class="text-[9px] font-black text-slate-700 truncate">${esc(h.status)}</div>
+                                                    <div class="text-[8px] text-slate-400 font-bold">${new Date(h.updated_at).toLocaleString(localeArLatinDigits)}</div>
+                                                </div>
+                                            </div>
+                                            <div class="h-32 bg-slate-100 rounded-xl flex items-center justify-center overflow-hidden border border-slate-50 relative epod-thumb-host"
+                                                 data-photo-path="${encPath}"
+                                                 data-is-pdf="${isPdf ? '1' : '0'}">
+                                                ${isPdf
+                                                    ? '<i class="fas fa-file-pdf text-4xl text-slate-300"></i>'
+                                                    : '<div class="animate-spin h-6 w-6 border-2 border-primary border-t-transparent rounded-full"></div>'}
+                                                <div class="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors pointer-events-none"></div>
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+
+                const timelineHtml = `
+                    <div class="mt-8 pt-8 border-t border-slate-100">
+                        <h4 class="text-slate-800 font-black text-sm mb-6 flex items-center gap-2">
+                            <i class="fas fa-history text-slate-400"></i> سجل التتبع
+                        </h4>
+                        <div class="space-y-6 mr-4 border-r-2 border-slate-100 pr-6">
+                            ${(s.history || []).reverse().map((h, i) => `
+                                <div class="relative">
+                                    <div class="absolute -right-[31px] top-1 w-4 h-4 rounded-full border-2 border-white ${i === 0 ? 'bg-primary ring-4 ring-primary/20' : 'bg-slate-300'}"></div>
+                                    <div class="flex justify-between items-start">
+                                        <div>
+                                            <div class="text-xs font-black text-slate-800 uppercase">${esc(h.status)}</div>
+                                            <div class="text-[10px] text-slate-400 mt-1">${new Date(h.updated_at).toLocaleString(localeArLatinDigits)}</div>
+                                        </div>
+                                        ${h.photo_path ? '<span class="text-[9px] font-bold bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-lg"><i class="fas fa-paperclip mr-1"></i> مرفق</span>' : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+
+                wrap.innerHTML = `
+                    <div class="bg-slate-50 rounded-3xl p-6 border border-slate-100">
+                        <div class="grid grid-cols-2 gap-y-6 gap-x-12">
+                            <div><span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">رقم الشحنة</span><div class="font-black text-xl text-slate-800">#${numsEn(s.id)}</div></div>
+                            <div class="text-left"><span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">الحالة الحالية</span><div class="mt-1"><span class="px-4 py-1.5 rounded-full text-[11px] font-black uppercase ${getStatusStyle(s.status)}">${esc(s.status)}</span></div></div>
+
+                            <div class="border-t border-slate-200/60 pt-4"><span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">التاجر / الشاحن</span><div class="font-bold text-slate-800 mt-1">${esc(s.shipper_name || '—')}</div><div class="text-[10px] text-slate-500 font-bold">${esc(s.shipper_phone || '')}</div></div>
+                            <div class="border-t border-slate-200/60 pt-4"><span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">السائق المكلف</span><div class="font-bold text-slate-800 mt-1">${esc(s.driver_name || '—')}</div><div class="text-[10px] text-slate-500 font-bold">${esc(s.driver_phone || '')}</div></div>
+
+                            <div class="col-span-2 border-t border-slate-200/60 pt-4"><span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">توصيف المسار</span>
+                                <div class="mt-2 space-y-3">
+                                    <div class="flex gap-3 items-start"><div class="w-6 h-6 rounded-lg bg-emerald-50 flex items-center justify-center shrink-0 mt-0.5"><i class="fas fa-location-dot text-[10px] text-emerald-600"></i></div> <div><div class="text-[10px] font-bold text-slate-400">نقطة الاستلام</div><div class="text-xs font-bold text-slate-700">${esc(s.pickup_address)}</div></div></div>
+                                    <div class="flex gap-3 items-start"><div class="w-6 h-6 rounded-lg bg-rose-50 flex items-center justify-center shrink-0 mt-0.5"><i class="fas fa-flag-checkered text-[10px] text-rose-600"></i></div> <div><div class="text-[10px] font-bold text-slate-400">وجهة التسليم</div><div class="text-xs font-bold text-slate-700">${esc(s.dropoff_address)}</div></div></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    ${podHtml || `
+                        <div class="mt-8 p-12 border-2 border-dashed border-slate-100 rounded-[2rem] text-center bg-slate-50/30">
+                            <div class="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center mx-auto mb-4 border border-slate-100"><i class="fas fa-box-open text-2xl text-slate-200"></i></div>
+                            <p class="text-xs text-slate-400 font-black">لا توجد صور أو مستندات إثبات (ePOD) مرفقة</p>
+                        </div>
+                    `}
+                    ${timelineHtml}
+                `;
+
+                wireShipmentPodGrid(wrap);
+            } catch (e) {
+                wrap.innerHTML = `<div class="py-12 text-center"><div class="w-16 h-16 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4"><i class="fas fa-exclamation-triangle text-2xl"></i></div><p class="text-rose-600 font-black text-sm">${esc(e.message || 'خطأ في جلب البيانات')}</p></div>`;
+            }
+        }
+
+        /**
+         * يربط شبكة إثباتات التسليم (ePOD) بعد رسمها:
+         *  - فتح المعاينة الكاملة عند النقر (بدون onclick مضمّن لتفادي مشاكل ترميز المسار)
+         *  - تحميل صور المصغّرات عبر fetch مع ترويسة الـ Authorization، ثم Blob URL
+         *    (الـ <img> العادي لا يستطيع إرسال JWT والمسار الموقّع قد يفشل بسبب CORS)
+         */
+        function wireShipmentPodGrid(root) {
+            const grid = root.querySelector('#shipment-epod-grid');
+            if (!grid) return;
+
+            grid.addEventListener('click', (e) => {
+                const card = e.target.closest('[data-action="preview-shipment-pod"]');
+                if (!card) return;
+                const enc = card.getAttribute('data-photo-path') || '';
+                const typ = card.getAttribute('data-doc-type') || 'image';
+                let url = '';
+                try { url = decodeURIComponent(enc); } catch (_) { url = enc; }
+                if (!url) return;
+                void previewDoc(url, typ, null, 'shipment_pod');
+            });
+
+            grid.querySelectorAll('.epod-thumb-host[data-is-pdf="0"]').forEach((host) => {
+                const enc = host.getAttribute('data-photo-path') || '';
+                if (!enc) return;
+                void loadShipmentPodThumbnail(host, enc);
+            });
+        }
+
+        async function loadShipmentPodThumbnail(host, encodedPath) {
+            const showFailure = () => {
+                host.innerHTML =
+                    '<div class="flex flex-col items-center pointer-events-none">' +
+                    '<i class="fas fa-image text-2xl text-slate-200"></i>' +
+                    '<span class="text-[8px] text-slate-400 mt-1">فشل التحميل</span>' +
+                    '</div>' +
+                    '<div class="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors pointer-events-none"></div>';
+            };
+
+            try {
+                const res = await fetch(`${API_URL}/admin/documents/preview?url=${encodedPath}`, {
+                    headers: authHeaders(),
+                });
+                if (!res.ok) { showFailure(); return; }
+                const rawBlob = await res.blob();
+                const ct = (res.headers.get('content-type') || rawBlob.type || '').toLowerCase();
+                /* بعض ملفات S3/MinIO تُحفظ بـ application/octet-stream — لا نستبعدها بل نُجبر mime صورة لأن
+                   هذا المسار مخصّص لصور ePOD (PDF يتعامل معه فرع آخر) */
+                let blob = rawBlob;
+                if (!ct.startsWith('image/')) {
+                    const ab = await rawBlob.arrayBuffer();
+                    blob = new Blob([ab], { type: 'image/jpeg' });
+                }
+
+                const blobUrl = URL.createObjectURL(blob);
+                const img = document.createElement('img');
+                img.src = blobUrl;
+                img.alt = 'ePOD';
+                img.className = 'w-full h-full object-cover';
+                img.onerror = () => {
+                    URL.revokeObjectURL(blobUrl);
+                    showFailure();
+                };
+                host.innerHTML = '';
+                host.appendChild(img);
+                const overlay = document.createElement('div');
+                overlay.className = 'absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors pointer-events-none';
+                host.appendChild(overlay);
+            } catch (_) {
+                showFailure();
+            }
+        }
+
+        function closeShipmentDetail() {
+            document.getElementById('shipment-detail-modal').style.display = 'none';
         }
 
         function closeAdminUserFormModal() {
@@ -1794,43 +2000,41 @@
                 renderPreviewInto(container, signedUrl, kind);
             };
 
-            try {
-                /* 1) السلوك القديم: رابط موقّع مباشرة في iframe / img */
-                const isOperatingCard = sourceKind === 'operating_card' || type === 'operating_card';
-                const signQs = hasDocId
-                    ? (isOperatingCard
-                        ? `cardId=${encodeURIComponent(String(idNum))}`
-                        : `docId=${encodeURIComponent(String(idNum))}`)
-                    : `url=${encodeURIComponent(url)}`;
-                const signRes = await fetch(`${API_URL}/admin/get-signed-url?${signQs}`, {
-                    headers: authHeaders(),
-                });
-                const signData = await signRes.json().catch(() => ({}));
-                const su = signData.signedUrl;
-                if (
-                    signRes.ok &&
-                    signData.success &&
-                    su &&
-                    (String(su).startsWith('http://') || String(su).startsWith('https://'))
-                ) {
-                    showSigned(su, signData.fileType || signData.previewKind);
-                    return;
-                }
+            const isOperatingCard = sourceKind === 'operating_card' || type === 'operating_card';
+            const signQs = hasDocId
+                ? (isOperatingCard
+                    ? `cardId=${encodeURIComponent(String(idNum))}`
+                    : `docId=${encodeURIComponent(String(idNum))}`)
+                : `url=${encodeURIComponent(url)}`;
 
-                /* 2) احتياطي: بث عبر السيرفر ثم blob (يعمل إذا فشل التوقيع أو حظر iframe) */
-                let res = null;
+            /* بث الملف عبر السيرفر (same-origin, authenticated) — أكثر موثوقية من تحميل
+               الرابط الموقّع مباشرة في الـ <img>/<iframe> الذي قد يفشل بسبب CORS
+               أو لأن نقطة MinIO الداخلية غير قابلة للوصول من المتصفح. */
+            const fetchPreviewBlob = async () => {
                 if (hasDocId) {
                     const previewKind = isOperatingCard ? 'operating_card' : 'compliance';
-                    res = await fetch(`${API_URL}/admin/documents/${idNum}/preview?kind=${previewKind}`, { headers: authHeaders() });
+                    const r1 = await fetch(`${API_URL}/admin/documents/${idNum}/preview?kind=${previewKind}`, { headers: authHeaders() });
+                    if (r1.ok) return r1;
                 }
-                if (!res || !res.ok) {
-                    res = await fetch(`${API_URL}/admin/documents/preview?url=${encodeURIComponent(url)}`, {
+                if (url) {
+                    return await fetch(`${API_URL}/admin/documents/preview?url=${encodeURIComponent(url)}`, {
                         headers: authHeaders(),
                     });
                 }
+                return null;
+            };
 
-                let ct = res.headers.get('content-type') || '';
-                if (res.ok) {
+            /* نطلب الرابط الموقّع بالتوازي ليُستخدم لزر «فتح في نافذة جديدة» وكاحتياط */
+            const signPromise = fetch(`${API_URL}/admin/get-signed-url?${signQs}`, { headers: authHeaders() })
+                .then(async (r) => ({ r, j: await r.json().catch(() => ({})) }))
+                .catch(() => ({ r: null, j: {} }));
+
+            let signData = {};
+            try {
+                /* 1) المسار المُفضّل: بث عبر السيرفر → Blob URL */
+                const res = await fetchPreviewBlob();
+                if (res && res.ok) {
+                    const ct = res.headers.get('content-type') || '';
                     const rawBlob = await res.blob();
                     const hdrKind = (res.headers.get('x-preview-kind') || '').toLowerCase();
                     const { kind, blob: previewBlob } = await normalizePreviewBlob(
@@ -1843,23 +2047,55 @@
                     window.__previewBlobUrl = blobUrl;
 
                     const baseName = pathHint.split('/').pop().split('?')[0] || (kind === 'pdf' ? 'document.pdf' : 'document');
-                    downloadBtn.href = blobUrl;
-                    downloadBtn.download = baseName;
+
+                    /* ننتظر الرابط الموقّع ليصبح زر «فتح في نافذة جديدة» يفتح ملفًا حقيقيًا
+                       لا blob: محلّيًا (الذي لا يعمل في تبويب جديد بعد إغلاق المودال). */
+                    try {
+                        const { r: signR, j: signJ } = await signPromise;
+                        const su = signJ && signJ.signedUrl;
+                        if (signR && signR.ok && signJ.success && su && (String(su).startsWith('http://') || String(su).startsWith('https://'))) {
+                            downloadBtn.href = su;
+                            downloadBtn.removeAttribute('download');
+                        } else {
+                            downloadBtn.href = blobUrl;
+                            downloadBtn.download = baseName;
+                        }
+                    } catch (_) {
+                        downloadBtn.href = blobUrl;
+                        downloadBtn.download = baseName;
+                    }
 
                     renderPreviewInto(container, blobUrl, kind);
                     return;
                 }
 
+                /* 2) احتياطي: الرابط الموقّع مباشرة في <img>/<iframe> */
+                const { r: signR, j: signJ } = await signPromise;
+                signData = signJ || {};
+                const su = signData.signedUrl;
+                if (
+                    signR && signR.ok &&
+                    signData.success &&
+                    su &&
+                    (String(su).startsWith('http://') || String(su).startsWith('https://'))
+                ) {
+                    showSigned(su, signData.fileType || signData.previewKind);
+                    return;
+                }
+
                 let msg = 'فشل تحميل المستند';
-                try {
-                    if (ct.includes('application/json')) {
-                        const j = await res.json();
-                        msg = j.message || msg;
-                    } else {
-                        const t = await res.text();
-                        if (t) msg = t;
-                    }
-                } catch (_) {}
+                if (res) {
+                    const ct = res.headers.get('content-type') || '';
+                    try {
+                        if (ct.includes('application/json')) {
+                            const j = await res.json();
+                            msg = j.message || msg;
+                        } else {
+                            const t = await res.text();
+                            if (t) msg = t;
+                        }
+                    } catch (_) {}
+                }
 
                 throw new Error(signData.message || msg);
             } catch (e) {

@@ -372,6 +372,59 @@ const AdminController = {
         }
     },
 
+    getShipmentDetail: async (req, res) => {
+        try {
+            const { id } = req.params;
+            const [rows] = await pool.execute(`
+                SELECT s.*,
+                       us.full_name AS shipper_name, us.phone AS shipper_phone,
+                       ud.full_name AS driver_name, ud.phone AS driver_phone
+                FROM shipments s
+                LEFT JOIN users us ON s.shipper_id = us.id
+                LEFT JOIN users ud ON s.driver_id = ud.id
+                WHERE s.id = ?
+                LIMIT 1
+            `, [id]);
+
+            if (!rows.length) {
+                return res.status(404).json({ success: false, message: 'الشحنة غير موجودة' });
+            }
+
+            const shipment = rows[0];
+
+            // Get history (timeline) including ePOD paths
+            const [history] = await pool.execute(`
+                SELECT id, status, location_lat, location_lng, photo_path, updated_at
+                FROM shipment_status_history
+                WHERE shipment_id = ?
+                ORDER BY updated_at ASC
+            `, [id]);
+
+            // Add signed URLs for ePOD photos
+            const historyWithUrls = await Promise.all((history || []).map(async h => {
+                if (h.photo_path) {
+                    try {
+                        h.photo_url = await generatePresignedUrl(h.photo_path);
+                    } catch (err) {
+                        console.error(`[AdminController] Error signing photo_path for history ${h.id}:`, err);
+                    }
+                }
+                return h;
+            }));
+
+            res.json({
+                success: true,
+                data: {
+                    ...shipment,
+                    history: historyWithUrls
+                }
+            });
+        } catch (error) {
+            console.error('[AdminController] getShipmentDetail:', error);
+            res.status(500).json({ success: false, message: 'خطأ في جلب تفاصيل الشحنة' });
+        }
+    },
+
     patchUserActive: async (req, res) => {
         try {
             const { id } = req.params;

@@ -34,19 +34,8 @@ class ImageUploadService {
     if (image == null) return null;
 
     final extension = _extensionOf(image.name);
-    if (!allowedProfileExtensions.contains(extension)) {
-      throw DarbakException(
-        'نوع الصورة غير مدعوم. الصيغ المسموحة: jpg, jpeg, png, webp',
-      );
-    }
-
     final bytes = await image.readAsBytes();
-    if (bytes.isEmpty) {
-      throw DarbakException('الصورة فارغة');
-    }
-    if (bytes.length > maxProfileImageBytes) {
-      throw DarbakException('حجم الصورة يجب ألا يتجاوز 5 ميجابايت');
-    }
+    validateProfileImage(fileName: image.name, byteLength: bytes.length);
 
     return PickedProfileImage(
       fileName: _safeProfileFileName(extension),
@@ -58,6 +47,24 @@ class ImageUploadService {
     final dotIndex = fileName.lastIndexOf('.');
     if (dotIndex < 0 || dotIndex == fileName.length - 1) return 'jpg';
     return fileName.substring(dotIndex + 1).toLowerCase();
+  }
+
+  static void validateProfileImage({
+    required String fileName,
+    required int byteLength,
+  }) {
+    final extension = _extensionOf(fileName);
+    if (!allowedProfileExtensions.contains(extension)) {
+      throw DarbakException(
+        'نوع الصورة غير مدعوم. الصيغ المسموحة: jpg, jpeg, png, webp',
+      );
+    }
+    if (byteLength <= 0) {
+      throw DarbakException('الصورة فارغة');
+    }
+    if (byteLength > maxProfileImageBytes) {
+      throw DarbakException('حجم الصورة يجب ألا يتجاوز 5 ميجابايت');
+    }
   }
 
   static String _safeProfileFileName(String extension) {

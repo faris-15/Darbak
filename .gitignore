@@ -1,52 +1,109 @@
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
-.DS_Store
-.atom/
-.build/
-.buildlog/
-.history
-.svn/
-.swiftpm/
-migrate_working_dir/
+# ============================================================================
+# Darbak — Root .gitignore
+# Covers Flutter app, Node.js backend, Playwright E2E, Docker, IDE, OS, logs.
+# ============================================================================
 
-# IntelliJ related
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+*.bak
+*.orig
+*.rej
+
+# --- IDEs ---
+.idea/
 *.iml
 *.ipr
 *.iws
-.idea/
+.vscode/
+.history/
+.fleet/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
+# --- Logs / Crash Dumps ---
+*.log
+hs_err_pid*.log
+replay_pid*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+test_out.txt
 
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
+# ============================================================================
+# Flutter / Dart
+# ============================================================================
+.atom/
+.build/
+.buildlog/
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
 /build/
 /coverage/
+**/doc/api/
+**/ios/Flutter/.last_build_id
+migrate_working_dir/
 
-# Symbolication related
+# Symbolication / obfuscation
 app.*.symbols
-
-# Obfuscation related
 app.*.map.json
 
-# Android Studio will place build artifacts here
+# Android Studio build outputs
 /android/app/debug
 /android/app/profile
 /android/app/release
+*.class
 
-# مفتاح حساب خدمة Firebase (لا ترفعه إلى Git)
+# Python
+*.pyc
+
+# ============================================================================
+# Node.js / Backend
+# ============================================================================
+node_modules/
+backend/node_modules/
+backend/coverage/
+backend/.env
+backend/.env.*.local
+.env
+.env.local
+.env.*.local
+
+# Firebase service account (NEVER commit)
 backend/firebase-service-account.json
 backend/*firebase-adminsdk*.json
+.firebase/
 
-# كاش أداة Firebase CLI محلياً
-.firebase
+# Local file uploads from the backend (user-generated content)
+backend/uploads/*
+!backend/uploads/.gitkeep
+!backend/uploads/epod/
+backend/uploads/epod/*
+!backend/uploads/epod/.gitkeep
+
+# ============================================================================
+# QA / Test reports (regenerated)
+# ============================================================================
+.tmp-qa-report/
+docs/test-report/
+
+# ============================================================================
+# Playwright E2E (e2e/admin-dashboard)
+# ============================================================================
+e2e/**/node_modules/
+e2e/**/playwright-report/
+e2e/**/test-results/
+e2e/**/.playwright/
+e2e/**/playwright/.cache/
+e2e/**/blob-report/
+
+# ============================================================================
+# Misc
+# ============================================================================
+*.tgz
+*.zip
+*.7z

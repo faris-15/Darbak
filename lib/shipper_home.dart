@@ -3,6 +3,7 @@
 import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -389,7 +390,8 @@ class _ShipperShipmentsScreenState extends State<ShipperShipmentsScreen> {
                                 ? 'بلغت الحد الأقصى للشحنات النشطة'
                                 : ''),
                       child: ElevatedButton.icon(
-                        onPressed: !_shipperKybVerified ||
+                        onPressed:
+                            !_shipperKybVerified ||
                                 _activeShipmentsCount >= _maxActiveShipments
                             ? null
                             : () async {
@@ -446,8 +448,9 @@ class _ShipperShipmentsScreenState extends State<ShipperShipmentsScreen> {
                               ),
                               const SizedBox(height: 8),
                               Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 32),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 32,
+                                ),
                                 child: Text(
                                   _shipperKybVerified
                                       ? 'اضغط على "شحنة جديدة" لبدء إنشاء شحنتك الأولى'
@@ -538,10 +541,10 @@ class _ShipperShipmentsScreenState extends State<ShipperShipmentsScreen> {
                                             : () {
                                                 Navigator.of(context).push(
                                                   MaterialPageRoute(
-                                                    builder: (_) =>
-                                                        ShipmentBidsDetailScreen(
+                                                    builder: (_) => ShipmentBidsDetailScreen(
                                                       shipmentId:
-                                                          (shipment['id'] as num)
+                                                          (shipment['id']
+                                                                  as num)
                                                               .toInt(),
                                                       pickupAddress:
                                                           shipment['pickup_address']
@@ -551,11 +554,9 @@ class _ShipperShipmentsScreenState extends State<ShipperShipmentsScreen> {
                                                               ?.toString(),
                                                       suggestedPrice:
                                                           SarFormatter.parse(
-                                                        shipment[
-                                                                'suggested_price'] ??
-                                                            shipment[
-                                                                'base_price'],
-                                                      ),
+                                                            shipment['suggested_price'] ??
+                                                                shipment['base_price'],
+                                                          ),
                                                     ),
                                                   ),
                                                 );
@@ -614,10 +615,10 @@ class _ShipperShipmentsScreenState extends State<ShipperShipmentsScreen> {
                                         child: ElevatedButton.icon(
                                           onPressed: !_shipperKybVerified
                                               ? null
-                                              : () =>
-                                                  _openRateDriver(shipment),
+                                              : () => _openRateDriver(shipment),
                                           icon: const Icon(
-                                              Icons.star_rate_rounded),
+                                            Icons.star_rate_rounded,
+                                          ),
                                           label: const Text('تقييم السائق'),
                                           iconAlignment: IconAlignment.end,
                                           style: ElevatedButton.styleFrom(
@@ -693,7 +694,16 @@ class _ShipmentWeightTonsInputFormatter extends TextInputFormatter {
 
 /// شاشة إنشاء شحنة جديدة (مع تحديد موقع التحميل + التسليم)
 class CreateShipmentScreen extends StatefulWidget {
-  const CreateShipmentScreen({super.key});
+  const CreateShipmentScreen({
+    super.key,
+    this.pickPickupLocation,
+    this.pickDropoffLocation,
+  });
+
+  final Future<Map<String, dynamic>?> Function(BuildContext context)?
+  pickPickupLocation;
+  final Future<Map<String, dynamic>?> Function(BuildContext context)?
+  pickDropoffLocation;
 
   @override
   State<CreateShipmentScreen> createState() => _CreateShipmentScreenState();
@@ -801,30 +811,38 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
   }
 
   Future<void> _pickPickupLocation() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const PickupLocationPickerScreen()),
-    );
+    final result =
+        await (widget.pickPickupLocation?.call(context) ??
+            Navigator.push<Map<String, dynamic>>(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const PickupLocationPickerScreen(),
+              ),
+            ));
 
     if (result != null && mounted) {
       setState(() {
-        pickupLat = result['lat'] as double;
-        pickupLng = result['lng'] as double;
+        pickupLat = (result['lat'] as num).toDouble();
+        pickupLng = (result['lng'] as num).toDouble();
         pickupMapsUrl = result['mapsUrl'] as String;
       });
     }
   }
 
   Future<void> _pickDropoffLocation() async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const DropoffLocationPickerScreen()),
-    );
+    final result =
+        await (widget.pickDropoffLocation?.call(context) ??
+            Navigator.push<Map<String, dynamic>>(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const DropoffLocationPickerScreen(),
+              ),
+            ));
 
     if (result != null && mounted) {
       setState(() {
-        dropoffLat = result['lat'] as double;
-        dropoffLng = result['lng'] as double;
+        dropoffLat = (result['lat'] as num).toDouble();
+        dropoffLng = (result['lng'] as num).toDouble();
         dropoffMapsUrl = result['mapsUrl'] as String;
       });
     }
@@ -968,10 +986,13 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
-                    inputFormatters: const [_ShipmentWeightTonsInputFormatter()],
+                    inputFormatters: const [
+                      _ShipmentWeightTonsInputFormatter(),
+                    ],
                     onChanged: (_) {
                       setState(() {});
-                      if (_requireSpecificTruck) _syncTruckRequirementFromWeight();
+                      if (_requireSpecificTruck)
+                        _syncTruckRequirementFromWeight();
                     },
                     validatorMsg: 'الرجاء إدخال الوزن',
                     customValidator: (value) {
@@ -1217,7 +1238,8 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                                     _truckRequirementFormKey.currentState
                                         ?.validateAll() ??
                                     false;
-                                if (!truckOk || _requiredTruckConfiguration == null) {
+                                if (!truckOk ||
+                                    _requiredTruckConfiguration == null) {
                                   setState(() => _isSubmitting = false);
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     const SnackBar(
@@ -1234,7 +1256,8 @@ class _CreateShipmentScreenState extends State<CreateShipmentScreen> {
                                 'weightKg': weightKg,
                                 if (_requireSpecificTruck &&
                                     _requiredTruckConfiguration != null)
-                                  ..._requiredTruckConfiguration!.toApiPayload(),
+                                  ..._requiredTruckConfiguration!
+                                      .toApiPayload(),
                                 'cargoDescription': _cargoTypeController.text
                                     .trim(),
                                 'pickupAddress': _fromController.text.trim(),
@@ -1636,6 +1659,10 @@ int? _readNotificationInt(Object? value) {
   return int.tryParse(value?.toString() ?? '');
 }
 
+@visibleForTesting
+String replaceShipmentIdWithRoute(String message, String? routeDescription) =>
+    _replaceShipmentIdWithRoute(message, routeDescription);
+
 String _replaceShipmentIdWithRoute(String message, String? routeDescription) {
   if (routeDescription == null || routeDescription.isEmpty) return message;
 
@@ -1660,6 +1687,10 @@ String _replaceShipmentIdWithRoute(String message, String? routeDescription) {
 
   return message;
 }
+
+@visibleForTesting
+String normalizeContractNotificationMessage(String message) =>
+    _normalizeContractNotificationMessage(message);
 
 String _normalizeContractNotificationMessage(String message) {
   return message.replaceFirst(
@@ -2196,8 +2227,8 @@ class _ShipperProfileScreenState extends State<ShipperProfileScreen> {
               ),
               _buildInfoCard(
                 'حالة التحقق',
-                switch (
-                    (_user?['verification_status'] ?? 'pending').toString()) {
+                switch ((_user?['verification_status'] ?? 'pending')
+                    .toString()) {
                   'verified' => 'موثّق',
                   'rejected' => 'مرفوض',
                   _ => 'قيد المراجعة',

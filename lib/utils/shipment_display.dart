@@ -27,6 +27,7 @@ String shipmentCitySegment(String? address) {
 /// Arabic labels for pickup / dropoff (cards & headers).
 const String kShipmentPickupLocationLabelAr = 'مكان التحميل';
 const String kShipmentDropoffLocationLabelAr = 'مكان التسليم';
+const String kShipmentDeliveryDateLabelAr = 'تاريخ التسليم';
 
 /// Primary line for an address on cards (first segment; full string if no comma).
 String shipmentAddressPrimaryLine(String? address, {int maxChars = 56}) {

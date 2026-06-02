@@ -28,12 +28,18 @@ class TripTrackingScreen extends StatefulWidget {
   final String driverRating;
   final String driverPhone;
 
+  /// Test seam: override the ChatSocketService factory used when pushing the
+  /// chat screen from this widget.  Production code leaves this null.
+  @visibleForTesting
+  final ChatSocketService Function()? chatSocketFactory;
+
   const TripTrackingScreen({
     super.key,
     required this.shipmentId,
     required this.driverName,
     required this.driverRating,
     required this.driverPhone,
+    this.chatSocketFactory,
   });
 
   @override
@@ -56,6 +62,7 @@ class _TripTrackingScreenState extends State<TripTrackingScreen> {
                   builder: (_) => ChatScreen(
                     shipmentId: widget.shipmentId,
                     otherUser: widget.driverName,
+                    chatSocketFactory: widget.chatSocketFactory,
                   ),
                 ),
               );
@@ -1189,7 +1196,25 @@ class ChatScreen extends StatefulWidget {
     this.otherUserProfileImageUrl,
     this.otherUserProfileImageKey,
     this.otherUserRole,
+    this.chatSocketFactory,
+    this.pickImage,
+    this.pickVideo,
+    this.currentPositionProvider,
+    this.pickLocation,
   });
+
+  /// Optional factory used to build the [ChatSocketService] for this screen.
+  /// Production code lets the default factory create a real socket; tests can
+  /// inject a fake that never attempts a real network connection.
+  final ChatSocketService Function()? chatSocketFactory;
+  final Future<PickedChatMedia?> Function(ImageSource source)? pickImage;
+  final Future<PickedChatMedia?> Function(ImageSource source)? pickVideo;
+  final Future<Position> Function()? currentPositionProvider;
+  final Future<Map<String, dynamic>?> Function(
+    BuildContext context,
+    LatLng initialLocation,
+  )?
+  pickLocation;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -1199,7 +1224,8 @@ class _ChatScreenState extends State<ChatScreen> {
   final List<ChatMessage> _messages = [];
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final ChatSocketService _chatSocket = ChatSocketService();
+  late final ChatSocketService _chatSocket =
+      widget.chatSocketFactory?.call() ?? ChatSocketService();
   final List<StreamSubscription<dynamic>> _socketSubscriptions = [];
   final Map<String, double> _uploadProgressByClientId = {};
   static const double _showScrollToBottomAfterOffset = 120;
@@ -1623,7 +1649,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _pickAndSendImage(ImageSource source) async {
     try {
-      final picked = await ChatMediaService.pickImage(source);
+      final picked =
+          await (widget.pickImage?.call(source) ??
+              ChatMediaService.pickImage(source));
       if (picked == null) return;
       await _sendMediaMessage(picked);
     } catch (e) {
@@ -1633,7 +1661,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Future<void> _pickAndSendVideo(ImageSource source) async {
     try {
-      final picked = await ChatMediaService.pickVideo(source);
+      final picked =
+          await (widget.pickVideo?.call(source) ??
+              ChatMediaService.pickVideo(source));
       if (picked == null) return;
       await _sendMediaMessage(picked);
     } catch (e) {
@@ -1751,15 +1781,17 @@ class _ChatScreenState extends State<ChatScreen> {
       }
 
       if (!mounted) return;
-      final result = await Navigator.of(context).push<Map<String, dynamic>>(
-        MaterialPageRoute(
-          builder: (_) => MapLocationPickerScreen(
-            title: 'اختيار موقع للمشاركة',
-            themeColor: DarbakColors.primaryGreen,
-            initialLocation: initialLocation,
-          ),
-        ),
-      );
+      final result =
+          await (widget.pickLocation?.call(context, initialLocation) ??
+              Navigator.of(context).push<Map<String, dynamic>>(
+                MaterialPageRoute(
+                  builder: (_) => MapLocationPickerScreen(
+                    title: 'اختيار موقع للمشاركة',
+                    themeColor: DarbakColors.primaryGreen,
+                    initialLocation: initialLocation,
+                  ),
+                ),
+              ));
       if (!mounted || result == null) return;
 
       final latitude = _doubleFromValue(result['lat']);
@@ -1797,6 +1829,9 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<Position> _currentPosition() async {
+    final provider = widget.currentPositionProvider;
+    if (provider != null) return provider();
+
     var permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();

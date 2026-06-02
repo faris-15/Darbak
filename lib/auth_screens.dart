@@ -15,6 +15,7 @@ import 'driver_home.dart';
 import 'shipper_home.dart';
 import 'api_service.dart';
 import 'services/profile_repository.dart';
+import 'utils/auth_messages.dart';
 
 /// مقاسات موحّدة لواجهات المصادقة (تسجيل الدخول، اختيار الدور، التسجيل).
 abstract final class DarbakAuthLayout {
@@ -26,7 +27,10 @@ abstract final class DarbakAuthLayout {
 
 /// شاشة السبلاتش (الشعار)
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+  const SplashScreen({super.key, this.completeImmediatelyForTest = false});
+
+  /// Test seam: skip Lottie and navigate on the first frame.
+  final bool completeImmediatelyForTest;
 
   @override
   State<SplashScreen> createState() => _SplashScreenState();
@@ -39,6 +43,12 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   void initState() {
     super.initState();
+    if (widget.completeImmediatelyForTest) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _navigateToLogin(context);
+      });
+      return;
+    }
     _controller.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
         if (mounted) {
@@ -298,7 +308,11 @@ class _ChooseRoleScreenState extends State<ChooseRoleScreen> {
 
 /// صفحة تسجيل الدخول
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  const LoginScreen({super.key, this.firebaseSignInOverride});
+
+  /// Test seam: return Firebase ID token without calling FirebaseAuth.
+  final Future<String?> Function(String email, String password)?
+      firebaseSignInOverride;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -354,31 +368,6 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  String _firebaseLoginMessage(Object e) {
-    if (e is DarbakException) {
-      return _stripThirdPartyFromAuthMessage(e.message);
-    }
-    if (e is FirebaseAuthException) {
-      switch (e.code) {
-        case 'user-not-found':
-        case 'wrong-password':
-        case 'invalid-credential':
-          return 'بيانات الدخول غير صحيحة';
-        case 'invalid-email':
-          return 'البريد الإلكتروني غير صالح';
-        case 'user-disabled':
-          return 'هذا الحساب معطّل';
-        case 'too-many-requests':
-          return 'محاولات كثيرة. حاول لاحقاً';
-        case 'network-request-failed':
-          return 'تعذّر الاتصال. تحقّق من الشبكة';
-        default:
-          return 'تعذّر تسجيل الدخول. حاول مرة أخرى';
-      }
-    }
-    return _stripThirdPartyFromAuthMessage(e.toString());
-  }
-
   Future<void> _login() async {
     setState(() => _loading = true);
     final identifier = _phoneEmailController.text.trim();
@@ -388,15 +377,17 @@ class _LoginScreenState extends State<LoginScreen> {
       await _completeLogin(data);
     } catch (e) {
       final isEmail = identifier.contains('@');
-      if (e is DarbakException &&
-          isEmail &&
-          e.httpStatus == 401) {
+      if (e is DarbakException && isEmail && e.httpStatus == 401) {
         try {
-          final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
-            email: identifier,
-            password: password,
-          );
-          final idToken = await cred.user?.getIdToken();
+          final override = widget.firebaseSignInOverride;
+          final idToken = override != null
+              ? await override(identifier, password)
+              : await FirebaseAuth.instance
+                  .signInWithEmailAndPassword(
+                    email: identifier,
+                    password: password,
+                  )
+                  .then((cred) => cred.user?.getIdToken());
           if (idToken == null || idToken.isEmpty) {
             throw DarbakException('تعذّر إكمال تسجيل الدخول');
           }
@@ -407,15 +398,15 @@ class _LoginScreenState extends State<LoginScreen> {
           await _completeLogin(data);
         } catch (fe) {
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(_firebaseLoginMessage(fe))),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text(firebaseLoginMessage(fe))));
         }
       } else {
         if (!mounted) return;
         final msg = e is DarbakException
-            ? _stripThirdPartyFromAuthMessage(e.message)
-            : _stripThirdPartyFromAuthMessage(e.toString());
+            ? stripThirdPartyFromAuthMessage(e.message)
+            : stripThirdPartyFromAuthMessage(e.toString());
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(msg)));
@@ -589,7 +580,32 @@ class _LoginScreenState extends State<LoginScreen> {
 class RegistrationScreen extends StatefulWidget {
   final String role;
 
-  const RegistrationScreen({super.key, required this.role});
+  /// Test seam: bypass platform file picker in widget tests.
+  final Future<({String path, String name})?> Function()? pickDocumentOverride;
+
+  /// Test seam: skip Firebase account linking after MySQL registration.
+  final Future<void> Function(String email, String password)?
+      linkFirebaseOverride;
+
+  /// Test seam: pre-set uploaded document path (skips file picker).
+  final String? documentPathForTest;
+
+  /// Test seam: jump directly to a registration step in widget tests.
+  final int? initialStepForTest;
+
+  /// Test seam: override the registration API call (avoids real file I/O).
+  final Future<Map<String, dynamic>> Function(Map<String, dynamic> data)?
+      registerOverride;
+
+  const RegistrationScreen({
+    super.key,
+    required this.role,
+    this.pickDocumentOverride,
+    this.linkFirebaseOverride,
+    this.documentPathForTest,
+    this.initialStepForTest,
+    this.registerOverride,
+  });
 
   @override
   State<RegistrationScreen> createState() => _RegistrationScreenState();
@@ -618,6 +634,18 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   bool _loading = false;
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.documentPathForTest != null) {
+      _documentPath = widget.documentPathForTest;
+      _documentFileName = widget.documentPathForTest!.split('/').last;
+    }
+    if (widget.initialStepForTest != null) {
+      _currentStep = widget.initialStepForTest!.clamp(0, 2);
+    }
+  }
+
+  @override
   void dispose() {
     _fullNameController.dispose();
     _phoneController.dispose();
@@ -634,6 +662,25 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
 
   Future<void> _pickDocument() async {
     try {
+      final override = widget.pickDocumentOverride;
+      if (override != null) {
+        final picked = await override();
+        if (picked == null) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('لم يتم اختيار أي ملف')));
+          return;
+        }
+        setState(() {
+          _documentPath = picked.path;
+          _documentFileName = picked.name;
+        });
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('تم اختيار الملف بنجاح')));
+        return;
+      }
+
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'webp'],
@@ -661,7 +708,15 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   }
 
   /// بعد نجاح التسجيل في MySQL ينشئ نفس البريف في Firebase حتى تعمل `sendPasswordResetEmail`.
-  Future<void> _linkFirebaseAfterMysqlRegister(String email, String password) async {
+  Future<void> _linkFirebaseAfterMysqlRegister(
+    String email,
+    String password,
+  ) async {
+    final override = widget.linkFirebaseOverride;
+    if (override != null) {
+      await override(email, password);
+      return;
+    }
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         await FirebaseAuth.instance.createUserWithEmailAndPassword(
@@ -671,7 +726,8 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         return;
       } on FirebaseAuthException catch (fe) {
         if (fe.code == 'email-already-in-use') return;
-        final looksLikeNetwork = fe.code == 'network-request-failed' ||
+        final looksLikeNetwork =
+            fe.code == 'network-request-failed' ||
             (fe.message?.toLowerCase().contains('network') ?? false);
         if (attempt == 0 && looksLikeNetwork) {
           await Future<void>.delayed(const Duration(seconds: 2));
@@ -681,7 +737,9 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
         final msg = looksLikeNetwork
             ? 'تعذّر الاتصال بالإنترنت. تأكد من الشبكة ثم أعد المحاولة.'
             : 'تم إنشاء الحساب. إن واجهت مشكلة في تسجيل الدخول لاحقاً، جرّب «نسيت كلمة المرور» أو تواصل مع الدعم.';
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
         return;
       }
     }
@@ -760,7 +818,11 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
             : null,
       };
 
-      await ApiService.register(data);
+      if (widget.registerOverride != null) {
+        await widget.registerOverride!(data);
+      } else {
+        await ApiService.register(data);
+      }
       await _linkFirebaseAfterMysqlRegister(
         _emailController.text.trim().toLowerCase(),
         _passwordController.text.trim(),
@@ -943,7 +1005,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
                     validator: (v) =>
                         (v == null || v.trim().isEmpty) ? 'مطلوب' : null,
                   ),
-                  const SizedBox(height:8),
+                  const SizedBox(height: 8),
                   TextFormField(
                     controller: _isthimaraNoController,
                     decoration: const InputDecoration(
@@ -1012,58 +1074,6 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   }
 }
 
-/// إخفاء أسماء مقدمي خدمة المصادقة من رسائل تُعرض في الواجهة.
-String _stripThirdPartyFromAuthMessage(String m) {
-  final lower = m.toLowerCase();
-  if (lower.contains('firebase') ||
-      lower.contains('google') ||
-      lower.contains('identitytoolkit') ||
-      m.contains('فايربيس')) {
-    return 'تعذّر إكمال العملية. حاول مرة أخرى.';
-  }
-  return m;
-}
-
-/// رسائل شاشة «نسيت كلمة المرور» — بدون تفاصيل تقنية للمستخدم.
-String _userFacingForgotPasswordMessage(Object error) {
-  const noAccount =
-      'لا يوجد حساب بهذا البريد الإلكتروني أو أنّه غير صحيح.';
-  if (error is DarbakException) {
-    final m = error.message;
-    final code = error.httpStatus;
-    if (code == 429) return m;
-    if (code == 400) return m;
-    if (m.contains('لا يوجد حساب')) return m;
-    if (code == 502 || code == 503) return m;
-    if (code == 500) {
-      return 'تعذّر إرسال الرابط حالياً. حاول لاحقاً.';
-    }
-    if (m.contains('تعذّر الاتصال بالخادم') ||
-        m.contains('تعذر الاتصال بالخادم')) {
-      return m;
-    }
-    return noAccount;
-  }
-  final s = error.toString();
-  if (s.contains('SocketException') ||
-      s.contains('Connection refused') ||
-      s.contains('Failed host lookup')) {
-    return 'تعذّر الاتصال بالخادم';
-  }
-  return noAccount;
-}
-
-/// إن ردّ الخادم يعني «المسار غير موجود» أو تعذّر sendOobCode نجرّب إرسال Firebase من التطبيق مباشرةً.
-bool _forgotPasswordUseFirebaseClientFallback(DarbakException e) {
-  final code = e.httpStatus;
-  final m = e.message;
-  if (code == 404 && m.contains('لا يوجد حساب')) return false;
-  if (code == 404) return true;
-  if (code == 502 || code == 503) return true;
-  if (m == 'تعذّر إكمال الطلب.') return true;
-  return false;
-}
-
 /// شاشة «نسيت كلمة المرور»: الطلب يمر عبر الخادم (التحقق من Firebase ثم sendOobCode) لتسجيل الرد وتجنب نجاح وهمي.
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -1094,18 +1104,18 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('سيصلك بريد لإعادة تعيين كلمة المرور.'),
-        ),
+        const SnackBar(content: Text('سيصلك بريد لإعادة تعيين كلمة المرور.')),
       );
       Navigator.of(context).pop();
     } on DarbakException catch (e) {
-      if (_forgotPasswordUseFirebaseClientFallback(e)) {
+      if (forgotPasswordUseFirebaseClientFallback(e)) {
         try {
           await FirebaseAuth.instance.setLanguageCode('ar');
           await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
           if (kDebugMode) {
-            debugPrint('[ForgotPassword] تم الإرسال عبر Firebase من التطبيق (احتياطي)');
+            debugPrint(
+              '[ForgotPassword] تم الإرسال عبر Firebase من التطبيق (احتياطي)',
+            );
           }
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1117,19 +1127,19 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
         } catch (fe) {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(_userFacingForgotPasswordMessage(fe))),
+            SnackBar(content: Text(userFacingForgotPasswordMessage(fe))),
           );
         }
       } else {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_userFacingForgotPasswordMessage(e))),
+          SnackBar(content: Text(userFacingForgotPasswordMessage(e))),
         );
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_userFacingForgotPasswordMessage(e))),
+        SnackBar(content: Text(userFacingForgotPasswordMessage(e))),
       );
     } finally {
       if (mounted) setState(() => _loading = false);

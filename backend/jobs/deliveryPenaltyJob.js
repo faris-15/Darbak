@@ -19,7 +19,7 @@ const acceptedBidAmountSql = `(
 
 /**
  * Daily sweep: update penalty_amount for driver-assigned, undelivered shipments
- * past the 5-day grace period. Sends FCM + in-app notification once when penalty first becomes > 0.
+ * past the deadline (0-day grace). Sends FCM + in-app notification once when penalty first becomes > 0.
  */
 const runDeliveryPenaltySweep = async () => {
   const placeholders = ACTIVE_STATUSES.map(() => '?').join(', ');
@@ -44,6 +44,7 @@ const runDeliveryPenaltySweep = async () => {
     if (!deadline || !Number.isFinite(bidAmount) || bidAmount <= 0) continue;
 
     const { percent, amount } = computeLatePenaltyFromDeadline(deadline, now, bidAmount);
+    console.log(`Checking Shipment #${row.id}: Deadline=${deadline.toISOString()}, Penalty=${amount}, PrevSent=${row.late_penalty_push_sent}`);
     const prevSent = Number(row.late_penalty_push_sent || 0) === 1;
 
     const prevAmount = Number(row.penalty_amount || 0);
@@ -56,7 +57,7 @@ const runDeliveryPenaltySweep = async () => {
     if (shouldNotifyFirstPenalty) {
       const driverId = Number(row.driver_id);
       const title = 'تنبيه تأخير التوصيل';
-      const body = `تم تطبيق جزاء تأخير ${percent}% على شحنة #${row.id}. سيتم خصم ${amount} ريال من مستحقاتك.`;
+      const body = `تم تطبيق خصم تأخير ${percent}% على شحنة #${row.id}. سيتم خصم ${amount} ريال من مستحقاتك.`;
       await sendPushToUser(driverId, {
         title,
         body,

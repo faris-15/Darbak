@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -379,7 +380,7 @@ class _TripsNavIcon extends StatelessWidget {
 }
 
 ({Color background, Color foreground, Color borderColor, IconData icon})
-    _tripCardStatusTheme(String? statusRaw) {
+_tripCardStatusTheme(String? statusRaw) {
   final s = statusRaw?.toString().trim() ?? '';
   switch (s) {
     case 'assigned':
@@ -565,8 +566,9 @@ class _TripPickupDropoffBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accent =
-        isActive ? DarbakColors.primaryGreen : Colors.blueGrey.shade700;
+    final accent = isActive
+        ? DarbakColors.primaryGreen
+        : Colors.blueGrey.shade700;
     final pickup = shipmentAddressPrimaryLine(
       shipment['pickup_address']?.toString(),
     );
@@ -584,7 +586,11 @@ class _TripPickupDropoffBlock extends StatelessWidget {
           value: pickup,
         ),
         Padding(
-          padding: const EdgeInsetsDirectional.only(start: 9, top: 2, bottom: 2),
+          padding: const EdgeInsetsDirectional.only(
+            start: 9,
+            top: 2,
+            bottom: 2,
+          ),
           child: Container(
             width: 2,
             height: 12,
@@ -609,10 +615,7 @@ class _TripCompanyHighlight extends StatelessWidget {
   final Map<String, dynamic> shipment;
   final bool isActive;
 
-  const _TripCompanyHighlight({
-    required this.shipment,
-    required this.isActive,
-  });
+  const _TripCompanyHighlight({required this.shipment, required this.isActive});
 
   @override
   Widget build(BuildContext context) {
@@ -655,6 +658,54 @@ class _TripCompanyHighlight extends StatelessWidget {
                             : DarbakColors.dark)
                       : DarbakColors.textSecondary,
                   height: 1.2,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _TripDeliveryDateHighlight extends StatelessWidget {
+  final Map<String, dynamic> shipment;
+
+  const _TripDeliveryDateHighlight({required this.shipment});
+
+  @override
+  Widget build(BuildContext context) {
+    final dateStr = shipment['expected_delivery_date'] ?? shipment['final_delivery_date'];
+    final formatted = formatShipmentDateTimeForUi(dateStr);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(
+          Icons.event_available_rounded,
+          size: 20,
+          color: Color(0xFF546E7A),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                kShipmentDeliveryDateLabelAr,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: DarbakColors.textSecondary,
+                ),
+              ),
+              Text(
+                formatted,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: DarbakColors.text,
+                  height: 1.25,
                 ),
               ),
             ],
@@ -723,6 +774,8 @@ class _ShipmentTripCard extends StatelessWidget {
                         isActive: isActive,
                       ),
                       const SizedBox(height: 10),
+                      _TripDeliveryDateHighlight(shipment: shipment),
+                      const SizedBox(height: 10),
                       Divider(
                         height: 1,
                         thickness: 1,
@@ -733,6 +786,38 @@ class _ShipmentTripCard extends StatelessWidget {
                         shipment: shipment,
                         isActive: isActive,
                       ),
+                      if (isActive)
+                        Builder(
+                          builder: (context) {
+                            final lp = _latePenaltyBannerInfo(shipment);
+                            if (lp == null) return const SizedBox.shrink();
+                            final isWarning = lp['status'] == 'warning';
+                            final color = isWarning ? Colors.orange.shade900 : Colors.red;
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    isWarning ? Icons.info_outline : Icons.warning_amber_rounded,
+                                    color: color,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      lp['message'] ?? '',
+                                      style: TextStyle(
+                                        color: color,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
                     ],
                   ),
                 ),
@@ -774,14 +859,21 @@ double? _shipmentDouble(dynamic v) {
   return double.tryParse(v.toString());
 }
 
-/// Active shipments: grace 5 days after [final_delivery_date] or [expected_delivery_date], then +5%/day capped at 25%.
+/// Active shipments: grace 0 days after [final_delivery_date] or [expected_delivery_date], then +5%/day capped at 25%.
+/// Exposed for unit tests (late-delivery penalty math).
+@visibleForTesting
+Map<String, dynamic>? latePenaltyBannerInfo(Map<String, dynamic> s) =>
+    _latePenaltyBannerInfo(s);
+
 Map<String, dynamic>? _latePenaltyBannerInfo(Map<String, dynamic> s) {
   final st = (s['status'] ?? '').toString();
   if (st == 'delivered' || st == 'cancelled') return null;
-  final deadline = _parseShipmentDate(s['final_delivery_date']) ??
+  final deadline =
+      _parseShipmentDate(s['final_delivery_date']) ??
       _parseShipmentDate(s['expected_delivery_date']);
   if (deadline == null) return null;
-  final bid = _shipmentDouble(s['accepted_bid_amount']) ??
+  final bid =
+      _shipmentDouble(s['accepted_bid_amount']) ??
       _shipmentDouble(s['suggested_price']) ??
       _shipmentDouble(s['base_price']);
   if (bid == null || bid <= 0) return null;
@@ -790,21 +882,45 @@ Map<String, dynamic>? _latePenaltyBannerInfo(Map<String, dynamic> s) {
   final serverAmt = _shipmentDouble(s['late_penalty_amount']);
   int pct;
   double amt;
-  if (serverPct != null && serverPct > 0 && serverAmt != null && serverAmt > 0) {
+
+  final now = DateTime.now();
+  final d0 = DateTime(deadline.year, deadline.month, deadline.day);
+  final d1 = DateTime(now.year, now.month, now.day);
+  final daysSince = d1.difference(d0).inDays;
+
+  if (serverPct != null &&
+      serverPct > 0 &&
+      serverAmt != null &&
+      serverAmt > 0) {
     pct = serverPct.clamp(0, 25).toInt();
     amt = serverAmt;
   } else {
-    final now = DateTime.now();
-    final d0 = DateTime(deadline.year, deadline.month, deadline.day);
-    final d1 = DateTime(now.year, now.month, now.day);
-    final daysSince = d1.difference(d0).inDays;
-    if (daysSince <= 5) return null;
-    final tier = daysSince - 5;
+    if (daysSince <= 1) {
+      // Warning phase: today or tomorrow (grace day)
+      if (daysSince >= 0) {
+        return {
+          'percent': 0,
+          'amount': 0.0,
+          'status': 'warning',
+          'message': daysSince == 0
+              ? 'غداً موعد التسليم. سيتم تطبيق خصم 5% بعد ذلك.'
+              : 'اليوم هو موعد التسليم. يرجى التسليم لتفادي خصم التأخير.'
+        };
+      }
+      return null;
+    }
+    final tier = daysSince - 1;
     pct = (tier * 5).clamp(0, 25).toInt();
     amt = double.parse((bid * pct / 100).toStringAsFixed(2));
   }
-  if (pct <= 0 || amt <= 0) return null;
-  return {'percent': pct, 'amount': amt};
+
+  if (pct <= 0) return null;
+  return {
+    'percent': pct,
+    'amount': amt,
+    'status': 'penalty',
+    'message': 'تأخير: تم تطبيق خصم $pct%'
+  };
 }
 
 class _ShipmentSummaryScreenState extends State<ShipmentSummaryScreen> {
@@ -868,6 +984,9 @@ class _ShipmentSummaryScreenState extends State<ShipmentSummaryScreen> {
     final contractKey = (shipment['contract_pdf_key'] ?? '').toString().trim();
     final st = (shipment['status'] ?? '').toString();
     final latePenalty = _latePenaltyBannerInfo(shipment);
+    // Only show penalty info inside summary if there is an actual deduction (> 0%)
+    final hasActualPenalty = latePenalty != null && (latePenalty['percent'] as num) > 0;
+    
     final canShowContract =
         contractKey.isNotEmpty &&
         const {
@@ -883,33 +1002,43 @@ class _ShipmentSummaryScreenState extends State<ShipmentSummaryScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (latePenalty != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: Material(
-                color: Colors.deepOrange.shade50,
-                borderRadius: BorderRadius.circular(12),
-                child: ListTile(
-                  shape: RoundedRectangleBorder(
+          if (hasActualPenalty)
+            Builder(
+              builder: (context) {
+                final isWarning = latePenalty['status'] == 'warning';
+                final bgColor = isWarning ? Colors.orange.shade50 : Colors.deepOrange.shade50;
+                final borderColor = isWarning ? Colors.orange.shade300 : Colors.deepOrange.shade300;
+                final iconColor = isWarning ? Colors.orange.shade800 : Colors.deepOrange.shade800;
+                final textColor = isWarning ? Colors.orange.shade900 : Colors.deepOrange.shade900;
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 14),
+                  child: Material(
+                    color: bgColor,
                     borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: Colors.deepOrange.shade300, width: 1.2),
-                  ),
-                  leading: Icon(
-                    Icons.warning_amber_rounded,
-                    color: Colors.deepOrange.shade800,
-                    size: 32,
-                  ),
-                  title: Text(
-                    'تنبيه: لقد تجاوزت مهلة التوصيل (5 أيام). تم تطبيق جزاء تأخير بنسبة ${latePenalty['percent']}% وسيتم خصم ${(latePenalty['amount'] as double).toStringAsFixed(2)} ريال من مستحقاتك. تزداد العقوبة 5% يومياً.',
-                    textAlign: TextAlign.right,
-                    style: TextStyle(
-                      color: Colors.deepOrange.shade900,
-                      fontWeight: FontWeight.w600,
-                      height: 1.35,
+                    child: ListTile(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: BorderSide(color: borderColor, width: 1.2),
+                      ),
+                      leading: Icon(
+                        isWarning ? Icons.info_outline : Icons.warning_amber_rounded,
+                        color: iconColor,
+                        size: 32,
+                      ),
+                      title: Text(
+                        latePenalty['message'] ?? '',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          color: textColor,
+                          fontWeight: FontWeight.w600,
+                          height: 1.35,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
+                );
+              },
             ),
           if (canShowContract)
             Padding(
@@ -950,10 +1079,7 @@ class _ShipmentSummaryScreenState extends State<ShipmentSummaryScreen> {
                     heading: 'الحالة النهائية',
                   ),
                   const SizedBox(height: 10),
-                  _TripPickupDropoffBlock(
-                    shipment: shipment,
-                    isActive: false,
-                  ),
+                  _TripPickupDropoffBlock(shipment: shipment, isActive: false),
                   const SizedBox(height: 10),
                   Divider(
                     height: 1,
@@ -961,10 +1087,7 @@ class _ShipmentSummaryScreenState extends State<ShipmentSummaryScreen> {
                     color: DarbakColors.border.withValues(alpha: 0.65),
                   ),
                   const SizedBox(height: 8),
-                  _TripCompanyHighlight(
-                    shipment: shipment,
-                    isActive: false,
-                  ),
+                  _TripCompanyHighlight(shipment: shipment, isActive: false),
                   const SizedBox(height: 8),
                   Text('من: ${shipment['pickup_address'] ?? '-'}'),
                   Text('إلى: ${shipment['dropoff_address'] ?? '-'}'),
@@ -979,6 +1102,25 @@ class _ShipmentSummaryScreenState extends State<ShipmentSummaryScreen> {
                       ),
                     ],
                   ),
+                  if (shipment['penalty_amount'] != null &&
+                      (shipment['penalty_amount'] as num) > 0)
+                    Row(
+                      children: [
+                        const Text(
+                          'خصم التأخير: ',
+                          style: TextStyle(color: Colors.red, fontSize: 13),
+                        ),
+                        SarPrice(
+                          amount: -(shipment['penalty_amount'] as num),
+                          style: const TextStyle(
+                            fontSize: 14,
+                            color: Colors.red,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          iconSize: 14,
+                        ),
+                      ],
+                    ),
                   Row(
                     children: [
                       const Text('السعر النهائي: '),
@@ -989,7 +1131,9 @@ class _ShipmentSummaryScreenState extends State<ShipmentSummaryScreen> {
                       ),
                     ],
                   ),
-                  Text('تاريخ الإنشاء: ${formatShipmentDateTimeForUi(shipment['created_at'])}'),
+                  Text(
+                    'تاريخ الإنشاء: ${formatShipmentDateTimeForUi(shipment['created_at'])}',
+                  ),
                   Text(
                     'تاريخ التسليم: ${shipment['actual_delivery_date'] != null ? formatShipmentDateTimeForUi(shipment['actual_delivery_date']) : 'غير متوفر'}',
                   ),
@@ -1242,8 +1386,26 @@ class _UnreadBadge extends StatelessWidget {
   }
 }
 
+class DriverOperatingCardSelection {
+  const DriverOperatingCardSelection({
+    required this.fileName,
+    required this.bytes,
+  });
+
+  final String fileName;
+  final Uint8List bytes;
+}
+
 class DriverProfileScreen extends StatefulWidget {
-  const DriverProfileScreen({super.key});
+  const DriverProfileScreen({
+    super.key,
+    this.pickOperatingCard,
+    this.pickOperatingCardExpiryDate,
+  });
+
+  final Future<DriverOperatingCardSelection?> Function()? pickOperatingCard;
+  final Future<DateTime?> Function(BuildContext context)?
+  pickOperatingCardExpiryDate;
 
   @override
   State<DriverProfileScreen> createState() => _DriverProfileScreenState();
@@ -1326,81 +1488,89 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   }
 
   Future<void> _uploadOperatingCard() async {
-    final type = await showModalBottomSheet<String>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.picture_as_pdf),
-              title: const Text('ملف PDF'),
-              onTap: () => Navigator.pop(context, 'pdf'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.image),
-              title: const Text('صورة'),
-              onTap: () => Navigator.pop(context, 'image'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (type == null) return;
-
     String? fileName;
     Uint8List? fileBytes;
 
-    if (type == 'pdf') {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['pdf'],
-        withData: true,
-      );
-      if (result == null || result.files.isEmpty) return;
-      fileName = result.files.first.name;
-      fileBytes = result.files.first.bytes;
-      if (fileBytes == null && result.files.first.path != null) {
-        final f = File(result.files.first.path!);
-        fileBytes = await f.readAsBytes();
-      }
+    final injectedCard = await widget.pickOperatingCard?.call();
+    if (injectedCard != null) {
+      fileName = injectedCard.fileName;
+      fileBytes = injectedCard.bytes;
     } else {
-      final picker = ImagePicker();
-      final source = await showModalBottomSheet<ImageSource>(
+      final type = await showModalBottomSheet<String>(
         context: context,
         builder: (context) => SafeArea(
           child: Wrap(
             children: [
               ListTile(
-                leading: const Icon(Icons.camera_alt),
-                title: const Text('الكاميرا'),
-                onTap: () => Navigator.pop(context, ImageSource.camera),
+                leading: const Icon(Icons.picture_as_pdf),
+                title: const Text('ملف PDF'),
+                onTap: () => Navigator.pop(context, 'pdf'),
               ),
               ListTile(
-                leading: const Icon(Icons.photo_library),
-                title: const Text('المعرض'),
-                onTap: () => Navigator.pop(context, ImageSource.gallery),
+                leading: const Icon(Icons.image),
+                title: const Text('صورة'),
+                onTap: () => Navigator.pop(context, 'image'),
               ),
             ],
           ),
         ),
       );
-      if (source == null) return;
-      final file = await picker.pickImage(source: source);
-      if (file == null) return;
-      fileName = file.name;
-      fileBytes = await file.readAsBytes();
+
+      if (type == null) return;
+
+      if (type == 'pdf') {
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: ['pdf'],
+          withData: true,
+        );
+        if (result == null || result.files.isEmpty) return;
+        fileName = result.files.first.name;
+        fileBytes = result.files.first.bytes;
+        if (fileBytes == null && result.files.first.path != null) {
+          final f = File(result.files.first.path!);
+          fileBytes = await f.readAsBytes();
+        }
+      } else {
+        final picker = ImagePicker();
+        final source = await showModalBottomSheet<ImageSource>(
+          context: context,
+          builder: (context) => SafeArea(
+            child: Wrap(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.camera_alt),
+                  title: const Text('الكاميرا'),
+                  onTap: () => Navigator.pop(context, ImageSource.camera),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_library),
+                  title: const Text('المعرض'),
+                  onTap: () => Navigator.pop(context, ImageSource.gallery),
+                ),
+              ],
+            ),
+          ),
+        );
+        if (source == null) return;
+        final file = await picker.pickImage(source: source);
+        if (file == null) return;
+        fileName = file.name;
+        fileBytes = await file.readAsBytes();
+      }
     }
 
     if (fileBytes == null || fileName == null) return;
 
-    final expiryDate = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now().add(const Duration(days: 365)),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365 * 10)),
-      helpText: 'تاريخ انتهاء بطاقة التشغيل',
-    );
+    final expiryDate =
+        await (widget.pickOperatingCardExpiryDate?.call(context) ??
+            showDatePicker(
+              context: context,
+              initialDate: DateTime.now().add(const Duration(days: 365)),
+              firstDate: DateTime.now(),
+              lastDate: DateTime.now().add(const Duration(days: 365 * 10)),
+              helpText: 'تاريخ انتهاء بطاقة التشغيل',
+            ));
 
     if (expiryDate == null) return;
 

@@ -17,6 +17,8 @@ router.get('/users/browse', AdminController.browseUsers);
 
 router.get('/shipments/browse', AdminController.browseShipments);
 
+router.get('/shipments/:id/detail', AdminController.getShipmentDetail);
+
 router.get('/users/:id/detail', AdminController.getUserDetail);
 
 router.patch('/users/:id/active', AdminController.patchUserActive);

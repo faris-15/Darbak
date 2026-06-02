@@ -16,6 +16,7 @@ import 'trip_screens.dart';
 import 'ratings_screen.dart';
 import 'widgets/sar_price.dart';
 import 'utils/shipment_display.dart';
+import 'driver_home.dart';
 
 /// شاشة متابعة حالة الرحلة مع Timeline و ePOD
 class JobTrackingScreen extends StatefulWidget {
@@ -646,7 +647,44 @@ class _JobTrackingScreenState extends State<JobTrackingScreen>
                 ),
               ),
 
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
+
+              // Late Penalty Banner
+              Builder(
+                builder: (context) {
+                  final latePenalty = latePenaltyBannerInfo(shipment);
+                  if (latePenalty == null || (latePenalty['percent'] as num) <= 0) {
+                    return const SizedBox.shrink();
+                  }
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.red.shade300, width: 1.5),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.warning_amber_rounded, color: Colors.red.shade800),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'تنبيه تأخير: تم تطبيق خصم ${latePenalty['percent']}% (${(latePenalty['amount'] as double).toStringAsFixed(2)} ريال) بسبب تجاوز موعد التسليم.',
+                            style: TextStyle(
+                              color: Colors.red.shade900,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 8),
 
               // Timeline
               _buildTimeline(currentStepIndex),

@@ -1,0 +1,19 @@
+{
+  "name": "darbak-admin-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cross-browser (Chrome / Edge / Firefox) Playwright tests for the Darbak admin dashboard SPA served from backend/admin_portal/index.html.",
+  "scripts": {
+    "test": "playwright test",
+    "test:chromium": "playwright test --project=chromium",
+    "test:edge": "playwright test --project=edge",
+    "test:firefox": "playwright test --project=firefox",
+    "test:ci": "playwright test --reporter=line,html",
+    "test:headed": "playwright test --headed",
+    "test:debug": "playwright test --debug",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
