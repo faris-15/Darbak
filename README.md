@@ -1,14 +1,19 @@
 # Darbak — Logistics & Freight Bidding Platform
 
 Darbak is a full-stack logistics platform that connects **shippers** who need to
-move freight with **drivers / fleet operators** who bid to transport it. It
-includes a **Flutter** mobile/web app, a **Node.js / Express** API backend,
-**real-time chat** and **live auction** over Socket.IO, **S3-compatible** object
-storage (MinIO) for documents and EPOD photos, **MySQL** for persistence, and a
-**browser-based admin dashboard** for KYB verification, ratings moderation, and
-operations.
+move freight with **drivers / fleet operators** who bid to transport it.
 
 > Graduation project — Bachelor of Computer Science.
+
+## Screenshots
+
+### Mobile Application
+
+![Darbak Mobile App](https://media.discordapp.net/attachments/1406067294211145809/1513490997248786552/image.png?ex=6a293d55&is=6a27ebd5&hm=777efee666fce31ec3387e4c645215f81bb629ce7901f8cdf395b07f6c9950b7&=&format=webp&quality=lossless&width=2500&height=938)
+
+### Mobile Application en
+
+![Darbak Mobile App en](https://media.discordapp.net/attachments/1406067294211145809/1513491256435539978/image.png?ex=6a293d92&is=6a27ec12&hm=ceee617433f045ed894c931017eaf64a3ddb74a64c3ced39e4004c40542d58a6&=&format=webp&quality=lossless&width=2500&height=956)
 
 ---
 
